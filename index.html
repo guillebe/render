@@ -613,9 +613,9 @@
                             // Add frame to encoder
                             // Use metadata.mediaTime for accurate sync
                             const timestamp = metadata.mediaTime;
-                            const duration = 1 / frameRate; // Best guess for duration
+                            const frameDuration = 1 / frameRate; // Best guess for duration
                             
-                            await videoSource.add(timestamp, duration);
+                            await videoSource.add(timestamp, frameDuration);
                             frameCount++;
                             
                             if (frameCount % 30 === 0) {
