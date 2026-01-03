@@ -346,8 +346,10 @@
 
         async function runPipeline(sourceType, source, textToBurn) {
             // 1. Load metadata based on source type
-            let displayWidth, displayHeight, duration;
+            let displayWidth, displayHeight, duration, frameRate;
             let currentHlsInstance = null;
+            let input = null; // Keep reference for audio extraction
+            let audioTrack = null; // Audio track reference
 
             const tempVideo = document.createElement('video');
             tempVideo.crossOrigin = 'anonymous';
@@ -355,7 +357,7 @@
             if (sourceType === 'file') {
                 // File-based source: Use Mediabunny for format info, video element for accurate duration
                 console.log("Loading file source...");
-                const input = new Input({
+                input = new Input({
                     source: new BlobSource(source),
                     formats: ALL_FORMATS
                 });
@@ -363,6 +365,17 @@
                 const videoTrack = await input.getPrimaryVideoTrack();
                 displayWidth = videoTrack.displayWidth;
                 displayHeight = videoTrack.displayHeight;
+                frameRate = videoTrack.frameRate || 30; // Use actual FPS from video track
+
+                // Try to get audio track
+                try {
+                    audioTrack = await input.getPrimaryAudioTrack();
+                    if (audioTrack) {
+                        console.log("Audio track found - sample rate:", audioTrack.sampleRate, "channels:", audioTrack.channels);
+                    }
+                } catch (err) {
+                    console.warn("No audio track found:", err);
+                }
 
                 // Setup temp video for file
                 tempVideo.src = URL.createObjectURL(source);
@@ -383,6 +396,7 @@
                 displayWidth = metadata.displayWidth;
                 displayHeight = metadata.displayHeight;
                 duration = metadata.duration || 10;
+                frameRate = 30; // HLS doesn't have reliable FPS detection, default to 30
                 currentHlsInstance = metadata.hlsInstance;
 
                 // Double-check duration from video element
@@ -400,7 +414,7 @@
                 throw new Error('Unknown source type: ' + sourceType);
             }
 
-            console.log("Video metadata:", { sourceType, displayWidth, displayHeight, duration: duration.toFixed(2) + 's' });
+            console.log("Video metadata:", { sourceType, displayWidth, displayHeight, duration: duration.toFixed(2) + 's', frameRate: frameRate + ' FPS' });
 
             // 2. Setup Canvas based on video dimensions
             canvas.width = displayWidth;
@@ -417,14 +431,30 @@
                 codec: 'avc',
                 bitrate: 6_000_000 // 6 Mbps for high-quality text
             });
-            output.addVideoTrack(videoSource, { frameRate: 30 });
+            output.addVideoTrack(videoSource, { frameRate });
+
+            // 6. Add audio track if available
+            let audioSource = null;
+            if (audioTrack) {
+                try {
+                    console.log("Adding audio track to output...");
+                    // For now, we'll attempt to copy audio from the input
+                    // This creates an audio source that will be filled during processing
+                    audioSource = audioTrack;
+                    output.addAudioTrack(audioTrack);
+                    console.log("✓ Audio track added to output");
+                } catch (err) {
+                    console.warn("Failed to add audio track:", err);
+                    audioSource = null;
+                }
+            }
+
             await output.start();
 
             console.log("=== STARTING VIDEO ENCODING ===");
 
-            // 6. Capture frames from video element instead of using VideoSampleSink
+            // 7. Capture frames from video element instead of using VideoSampleSink
             let frameCount = 0;
-            const frameRate = 30;
             const frameDuration = 1 / frameRate;
             const totalFrames = Math.ceil(duration * frameRate);
 
@@ -493,7 +523,7 @@
             await videoSource.close();
             console.log("✓ Video source closed");
 
-            // 7. Finalize and Export
+            // 8. Finalize and Export
             status.textContent = "Finalizing MP4 file...";
             console.log("Calling output.finalize()...");
             await output.finalize();
