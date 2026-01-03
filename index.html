@@ -5,17 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mediabunny Caption Burner - Final Prototype</title>
     <style>
-        body { font-family: -apple-system, system-ui, sans-serif; max-width: 900px; margin: 2rem auto; background: #f8fafc; padding: 0 1rem; color: #1e293b; }
-        .box { background: white; padding: 2.5rem; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); text-align: center; }
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, system-ui, sans-serif; max-width: 900px; margin: 2rem auto; background: #0f172a; padding: 0 1rem; color: #e2e8f0; }
+        .box { background: #1e293b; padding: 2.5rem; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); text-align: center; border: 1px solid #334155; }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2rem; }
-        video { width: 100%; border-radius: 8px; background: #000; border: 1px solid #e2e8f0; aspect-ratio: 16/9; }
-        button { background: #2563eb; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: background 0.2s; }
-        button:hover { background: #1d4ed8; }
-        button:disabled { background: #94a3b8; cursor: not-allowed; }
-        input[type="text"] { padding: 10px; width: 70%; margin: 15px 0; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 1rem; text-align: center; }
-        #status { margin-top: 1.5rem; font-weight: 600; color: #475569; min-height: 1.5em; }
-        .loading-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: white; display: flex; justify-content: center; align-items: center; z-index: 100; flex-direction: column; }
-        .divider { margin: 1.5rem 0; color: #cbd5e1; font-weight: 600; }
+        video { width: 100%; border-radius: 8px; background: #000; border: 1px solid #334155; aspect-ratio: 16/9; }
+        button { background: #2563eb; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: all 0.2s; }
+        button:hover { background: #1d4ed8; transform: translateY(-1px); }
+        button:disabled { background: #475569; cursor: not-allowed; }
+        input[type="text"], input[type="file"] { padding: 10px; width: 70%; margin: 15px 0; border: 1px solid #475569; border-radius: 6px; font-size: 1rem; text-align: center; background: #0f172a; color: #e2e8f0; }
+        input[type="text"]:focus, input[type="file"]:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+        #status { margin-top: 1.5rem; font-weight: 600; color: #94a3b8; min-height: 1.5em; }
+        .loading-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: #0f172a; display: flex; justify-content: center; align-items: center; z-index: 100; flex-direction: column; }
+
+        /* Tabs styling */
+        .tabs-container { display: flex; gap: 0.5rem; margin-bottom: 2rem; border-bottom: 2px solid #334155; }
+        .tab { padding: 12px 24px; background: none; border: none; cursor: pointer; color: #94a3b8; font-size: 1rem; font-weight: 600; border-bottom: 3px solid transparent; transition: all 0.2s; }
+        .tab:hover { color: #cbd5e1; }
+        .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        h1 { margin-top: 0; color: #f1f5f9; }
+        p { color: #cbd5e1; }
+        .info-text { font-size: 0.9rem; color: #94a3b8; margin: 0.5rem 0; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
 </head>
@@ -27,20 +40,27 @@
     </div>
 
     <div class="box">
-        <h1>Video Caption Burner</h1>
-        <p>Processes everything locally in your browser using WebCodecs.</p>
+        <h1>🔥 Video Caption Burner</h1>
+        <p>Burn captions onto your videos. Works with files and HLS streams. Everything processes locally in your browser.</p>
 
-        <p style="margin: 1rem 0 0.5rem 0; font-size: 0.9rem; color: #64748b;">Upload Video File</p>
-        <input type="file" id="fileInput" accept="video/mp4,video/webm" /><br>
+        <div class="tabs-container">
+            <button class="tab active" data-tab="file-tab">📁 Upload Video</button>
+            <button class="tab" data-tab="hls-tab">🌐 HLS Stream</button>
+        </div>
 
-        <div class="divider">— OR —</div>
+        <div id="file-tab" class="tab-content active">
+            <p class="info-text">Select an MP4 or WebM video file from your device</p>
+            <input type="file" id="fileInput" accept="video/mp4,video/webm" /><br>
+        </div>
 
-        <p style="margin: 0.5rem 0; font-size: 0.9rem; color: #64748b;">Enter HLS Stream URL</p>
-        <input type="text" id="hlsUrlInput" placeholder="https://example.com/video.m3u8" /><br>
+        <div id="hls-tab" class="tab-content">
+            <p class="info-text">Paste an HLS stream URL (must end with .m3u8)</p>
+            <input type="text" id="hlsUrlInput" placeholder="https://example.com/video.m3u8" /><br>
+        </div>
 
-        <input type="text" id="captionText" value="CLIENT PREVIEW - JANUARY 2026" placeholder="Enter text to burn"><br>
-        <button id="processBtn" disabled>Process & Burn Captions</button>
-        <div id="status">Please select an MP4 file or HLS stream URL.</div>
+        <input type="text" id="captionText" value="CLIENT PREVIEW - JANUARY 2026" placeholder="Enter caption text"><br>
+        <button id="processBtn" disabled>⚡ Process & Burn Captions</button>
+        <div id="status">Select a video to get started</div>
     </div>
 
     <div class="grid">
@@ -91,6 +111,31 @@
         let sourceType = null; // 'file' or 'hls'
         let hlsInstance = null;
         let outputBlob = null;
+
+        // Tab switching functionality
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active class from all tabs and contents
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+                // Add active class to clicked tab
+                tab.classList.add('active');
+
+                // Show corresponding content
+                const tabId = tab.getAttribute('data-tab');
+                document.getElementById(tabId).classList.add('active');
+
+                // Clear the other input
+                if (tabId === 'file-tab') {
+                    hlsUrlInput.value = '';
+                    hlsUrl = null;
+                } else {
+                    fileInput.value = '';
+                    selectedFile = null;
+                }
+            });
+        });
 
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length) {
@@ -407,15 +452,22 @@
                     // Draw video frame to canvas
                     ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
 
-                    // Draw Caption Text Overlay
-                    ctx.font = `bold ${Math.floor(canvas.height * 0.08)}px sans-serif`;
+                    // Draw Caption Text Overlay with adaptive positioning for vertical/horizontal videos
+                    const aspectRatio = canvas.width / canvas.height;
+                    const isVertical = aspectRatio < 1; // Vertical if width < height (e.g., 9:16)
+
+                    // Scale font size based on video orientation
+                    const fontSize = isVertical ? canvas.height * 0.06 : canvas.height * 0.08;
+                    ctx.font = `bold ${Math.floor(fontSize)}px sans-serif`;
                     ctx.fillStyle = '#ffffff';
                     ctx.strokeStyle = '#000000';
                     ctx.lineWidth = Math.max(2, canvas.height * 0.005);
                     ctx.textAlign = 'center';
 
                     const x = canvas.width / 2;
-                    const y = canvas.height - (canvas.height * 0.1);
+                    // For vertical videos: position caption higher (30% from bottom instead of 10%)
+                    // For horizontal videos: keep at bottom (10% from bottom)
+                    const y = isVertical ? canvas.height - (canvas.height * 0.3) : canvas.height - (canvas.height * 0.1);
 
                     ctx.strokeText(textToBurn, x, y);
                     ctx.fillText(textToBurn, x, y);
