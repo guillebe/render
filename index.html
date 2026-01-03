@@ -141,48 +141,60 @@
                 const frame = sample.data;
 
                 if (sampleCount <= 3) {
-                    console.log(`Sample ${sampleCount}:`, { timestamp: sample.timestamp, duration: sample.duration });
+                    console.log(`Sample ${sampleCount}:`, { timestamp: sample.timestamp, duration: sample.duration, hasData: !!frame });
                 }
 
                 // Ensure the sample data is a valid VideoFrame
                 if (frame instanceof VideoFrame) {
-                    // A. Draw video frame to our processing canvas
-                    ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
-
-                    // B. Draw Caption Text Overlay
-                    // Font size scales with video height (8% of height)
-                    ctx.font = `bold ${Math.floor(canvas.height * 0.08)}px sans-serif`;
-                    ctx.fillStyle = '#ffffff';
-                    ctx.strokeStyle = '#000000';
-                    ctx.lineWidth = Math.max(2, canvas.height * 0.005);
-                    ctx.textAlign = 'center';
-
-                    const x = canvas.width / 2;
-                    const y = canvas.height - (canvas.height * 0.1); // 10% from bottom
-
-                    ctx.strokeText(textToBurn, x, y);
-                    ctx.fillText(textToBurn, x, y);
-
-                    // C. Feed the canvas into the output encoder
-                    // CanvasSource.add(timestamp, duration) - timestamps in seconds
-                    const timestampSec = sample.timestamp / 1_000_000; // microseconds to seconds
-                    const frameDuration = (sample.duration || 33333) / 1_000_000; // use sample duration or default to 30fps
-
                     try {
+                        // A. Draw video frame to our processing canvas
+                        ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+
+                        // B. Draw Caption Text Overlay
+                        // Font size scales with video height (8% of height)
+                        ctx.font = `bold ${Math.floor(canvas.height * 0.08)}px sans-serif`;
+                        ctx.fillStyle = '#ffffff';
+                        ctx.strokeStyle = '#000000';
+                        ctx.lineWidth = Math.max(2, canvas.height * 0.005);
+                        ctx.textAlign = 'center';
+
+                        const x = canvas.width / 2;
+                        const y = canvas.height - (canvas.height * 0.1); // 10% from bottom
+
+                        ctx.strokeText(textToBurn, x, y);
+                        ctx.fillText(textToBurn, x, y);
+
+                        // C. Feed the canvas into the output encoder
+                        // CanvasSource.add(timestamp, duration) - timestamps in seconds
+                        const timestampSec = sample.timestamp / 1_000_000; // microseconds to seconds
+                        const frameDuration = (sample.duration || 33333) / 1_000_000; // use sample duration or default to 30fps
+
                         await videoSource.add(timestampSec, frameDuration);
                         if (sampleCount === 1) {
                             console.log("✓ First frame added successfully");
                         }
-                    } catch (addErr) {
-                        console.error(`✗ Error adding frame ${sampleCount}:`, addErr);
-                        throw addErr;
-                    }
 
-                    // D. CRITICAL: Free GPU memory
-                    frame.close();
-                    frameCount++;
-                } else {
+                        frameCount++;
+                    } catch (err) {
+                        console.error(`✗ Error processing frame ${sampleCount}:`, err);
+                        throw err;
+                    } finally {
+                        // D. CRITICAL: Always close the frame after processing
+                        frame.close();
+                    }
+                } else if (frame !== undefined) {
                     console.warn(`Sample ${sampleCount} is not a VideoFrame:`, frame?.constructor?.name);
+                } else {
+                    if (sampleCount <= 5 || sampleCount % 50 === 0) {
+                        console.log(`Sample ${sampleCount} has no data (metadata/audio sample, skipping)`);
+                    }
+                }
+
+                // E. CRITICAL: Close the sample to prevent garbage collection warning
+                try {
+                    sample.close();
+                } catch (closeErr) {
+                    console.warn(`Could not close sample ${sampleCount}:`, closeErr);
                 }
 
                 if (frameCount > 0 && frameCount % 30 === 0) {
