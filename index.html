@@ -55,10 +55,10 @@
 
         <div id="hls-tab" class="tab-content">
             <p class="info-text">Paste an HLS stream URL (must end with .m3u8)</p>
-            <input type="text" id="hlsUrlInput" placeholder="https://example.com/video.m3u8" /><br>
+            <input type="text" id="hlsUrlInput" value="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" placeholder="https://example.com/video.m3u8" /><br>
         </div>
 
-        <input type="text" id="captionText" value="CLIENT PREVIEW - JANUARY 2026" placeholder="Enter caption text"><br>
+        <input type="text" id="captionText" value="CAPTION" placeholder="Enter caption text"><br>
         <button id="processBtn" disabled>⚡ Process & Burn Captions</button>
         <div id="status">Select a video to get started</div>
     </div>
@@ -412,6 +412,13 @@
                 }
             } else {
                 throw new Error('Unknown source type: ' + sourceType);
+            }
+
+            // Cap output duration at 30 seconds
+            const MAX_OUTPUT_DURATION = 30;
+            if (duration > MAX_OUTPUT_DURATION) {
+                console.log(`Duration limited: ${duration.toFixed(2)}s → ${MAX_OUTPUT_DURATION}s`);
+                duration = MAX_OUTPUT_DURATION;
             }
 
             console.log("Video metadata:", { sourceType, displayWidth, displayHeight, duration: duration.toFixed(2) + 's', frameRate: frameRate + ' FPS' });
