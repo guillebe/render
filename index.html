@@ -93,7 +93,7 @@
             Mp4OutputFormat, 
             CanvasSource,
             VideoSampleSink,
-            MediaStreamSource,
+            MediaStreamAudioTrackSource,
             ALL_FORMATS 
         } from 'https://esm.sh/mediabunny@1.25.8';
 
@@ -433,12 +433,16 @@
                     const stream = tempVideo.captureStream ? tempVideo.captureStream() : tempVideo.mozCaptureStream();
                     
                     if (stream) {
-                        // Create a MediaStreamSource wrapper for mediabunny
-                        const msSource = new MediaStreamSource(stream);
-                        // Get track from this source wrapper
-                        input = new Input({ source: msSource, formats: ALL_FORMATS });
-                        audioTrack = await input.getPrimaryAudioTrack();
-                        console.log("Captured HLS audio track via MediaStreamSource");
+                        const nativeAudioTrack = stream.getAudioTracks()[0];
+                        if (nativeAudioTrack) {
+                            // Use MediaStreamAudioTrackSource to encode the real-time audio
+                            // We attempt to use AAC (mp4a.40.2) for MP4 compatibility, though browser support varies.
+                            // If this fails, we might need to fallback to Opus and WebM container.
+                            audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack);
+                            console.log("Captured HLS audio track via MediaStreamAudioTrackSource");
+                        } else {
+                            console.warn("Stream captured but no audio track found.");
+                        }
                     } else {
                         console.warn("captureStream not supported, HLS will be silent.");
                     }
