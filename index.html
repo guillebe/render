@@ -265,6 +265,40 @@
             });
         }
 
+        // Helper function to wait for video metadata and get actual duration
+        async function getVideoMetadata(videoElement) {
+            return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Video metadata loading timeout'));
+                }, 10000);
+
+                const onLoadedMetadata = () => {
+                    clearTimeout(timeout);
+                    videoElement.removeEventListener('loadedmetadata', onLoadedMetadata);
+                    videoElement.removeEventListener('error', onError);
+
+                    const actualDuration = videoElement.duration;
+                    console.log("Video metadata loaded - duration:", actualDuration);
+
+                    resolve({
+                        width: videoElement.videoWidth,
+                        height: videoElement.videoHeight,
+                        duration: actualDuration
+                    });
+                };
+
+                const onError = () => {
+                    clearTimeout(timeout);
+                    videoElement.removeEventListener('loadedmetadata', onLoadedMetadata);
+                    videoElement.removeEventListener('error', onError);
+                    reject(videoElement.error || new Error('Video loading error'));
+                };
+
+                videoElement.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+                videoElement.addEventListener('error', onError, { once: true });
+            });
+        }
+
         async function runPipeline(sourceType, source, textToBurn) {
             // 1. Load metadata based on source type
             let displayWidth, displayHeight, duration;
@@ -274,7 +308,7 @@
             tempVideo.crossOrigin = 'anonymous';
 
             if (sourceType === 'file') {
-                // File-based source: Use Mediabunny
+                // File-based source: Use Mediabunny for format info, video element for accurate duration
                 console.log("Loading file source...");
                 const input = new Input({
                     source: new BlobSource(source),
@@ -284,10 +318,19 @@
                 const videoTrack = await input.getPrimaryVideoTrack();
                 displayWidth = videoTrack.displayWidth;
                 displayHeight = videoTrack.displayHeight;
-                duration = videoTrack.duration || 10;
 
                 // Setup temp video for file
                 tempVideo.src = URL.createObjectURL(source);
+
+                // Wait for actual video metadata to get accurate duration
+                try {
+                    const videoMeta = await getVideoMetadata(tempVideo);
+                    duration = videoMeta.duration;
+                    console.log("Got actual video duration from element:", duration);
+                } catch (err) {
+                    console.warn("Failed to get duration from video element, using Mediabunny duration:", err);
+                    duration = videoTrack.duration || 10;
+                }
             } else if (sourceType === 'hls') {
                 // HLS source: Load directly
                 console.log("Loading HLS source...");
@@ -296,11 +339,23 @@
                 displayHeight = metadata.displayHeight;
                 duration = metadata.duration || 10;
                 currentHlsInstance = metadata.hlsInstance;
+
+                // Double-check duration from video element
+                if (!isFinite(duration) || duration <= 0) {
+                    console.warn("Invalid duration from HLS metadata, getting from video element");
+                    try {
+                        const videoMeta = await getVideoMetadata(tempVideo);
+                        duration = videoMeta.duration;
+                    } catch (err) {
+                        console.error("Failed to get duration:", err);
+                        duration = 10;
+                    }
+                }
             } else {
                 throw new Error('Unknown source type: ' + sourceType);
             }
 
-            console.log("Video metadata:", { sourceType, displayWidth, displayHeight, duration });
+            console.log("Video metadata:", { sourceType, displayWidth, displayHeight, duration: duration.toFixed(2) + 's' });
 
             // 2. Setup Canvas based on video dimensions
             canvas.width = displayWidth;
