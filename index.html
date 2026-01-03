@@ -82,11 +82,15 @@
         processBtn.addEventListener('click', async () => {
             processBtn.disabled = true;
             status.textContent = "Processing... do not close this tab.";
-            
+
+            console.log("=== PIPELINE START ===");
             try {
                 await runPipeline(selectedFile, document.getElementById('captionText').value);
+                console.log("=== PIPELINE SUCCESS ===");
             } catch (err) {
-                console.error("Pipeline Error:", err);
+                console.error("=== PIPELINE ERROR ===", err);
+                console.error("Error message:", err.message);
+                console.error("Error stack:", err.stack);
                 status.textContent = "Error: " + err.message;
                 processBtn.disabled = false;
             }
@@ -123,11 +127,22 @@
             // 5. Setup Sink to pull decoded frames
             const sink = new VideoSampleSink(videoTrack);
             let frameCount = 0;
+            let sampleCount = 0;
+
+            console.log("=== STARTING FRAME LOOP ===");
+            console.log("Canvas size:", canvas.width, "x", canvas.height);
+            console.log("VideoSampleSink:", sink);
+            console.log("CanvasSource methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(videoSource)).filter(m => !m.startsWith('_')));
 
             //
             // This loop pulls samples one by one from the file
             for await (const sample of sink.samples()) {
+                sampleCount++;
                 const frame = sample.data;
+
+                if (sampleCount <= 3) {
+                    console.log(`Sample ${sampleCount}:`, { timestamp: sample.timestamp, duration: sample.duration });
+                }
 
                 // Ensure the sample data is a valid VideoFrame
                 if (frame instanceof VideoFrame) {
@@ -151,49 +166,80 @@
                     // C. Feed the canvas into the output encoder
                     // CanvasSource.add(timestamp, duration) - timestamps in seconds
                     const timestampSec = sample.timestamp / 1_000_000; // microseconds to seconds
-                    const frameDuration = 1 / 30; // 30 FPS = 33.33ms per frame
+                    const frameDuration = (sample.duration || 33333) / 1_000_000; // use sample duration or default to 30fps
 
-                    await videoSource.add(timestampSec, frameDuration);
+                    try {
+                        await videoSource.add(timestampSec, frameDuration);
+                        if (sampleCount === 1) {
+                            console.log("✓ First frame added successfully");
+                        }
+                    } catch (addErr) {
+                        console.error(`✗ Error adding frame ${sampleCount}:`, addErr);
+                        throw addErr;
+                    }
 
                     // D. CRITICAL: Free GPU memory
                     frame.close();
+                    frameCount++;
+                } else {
+                    console.warn(`Sample ${sampleCount} is not a VideoFrame:`, frame?.constructor?.name);
                 }
 
-                frameCount++;
-                if (frameCount % 30 === 0) {
+                if (frameCount > 0 && frameCount % 30 === 0) {
                     status.textContent = `Processing: ${frameCount} frames completed...`;
                 }
             }
 
+            console.log("=== FRAME LOOP COMPLETE ===");
+            console.log("Total samples:", sampleCount, "Total frames encoded:", frameCount);
+
             // Close the video source to signal end of stream
+            console.log("Closing video source...");
             await videoSource.close();
+            console.log("✓ Video source closed");
 
             // 6. Finalize and Export
             status.textContent = "Finalizing MP4 file...";
+            console.log("Calling output.finalize()...");
             await output.finalize();
+            console.log("✓ output.finalize() complete");
 
             // Debug: Check what's in the buffer
+            console.log("=== OUTPUT BUFFER DEBUG ===");
             console.log("output.target:", output.target);
             console.log("output.target.buffer:", output.target.buffer);
             console.log("Buffer type:", output.target.buffer?.constructor?.name);
-            console.log("Buffer size:", output.target.buffer?.byteLength || output.target.buffer?.length || 'unknown');
+            console.log("Buffer byteLength:", output.target.buffer?.byteLength);
+            console.log("Buffer length:", output.target.buffer?.length);
 
             let finalBlob;
             if (output.target.buffer instanceof ArrayBuffer) {
+                console.log("Buffer is ArrayBuffer - creating Uint8Array wrapper");
                 finalBlob = new Blob([new Uint8Array(output.target.buffer)], { type: 'video/mp4' });
             } else if (output.target.buffer instanceof Uint8Array) {
+                console.log("Buffer is Uint8Array - using directly");
                 finalBlob = new Blob([output.target.buffer], { type: 'video/mp4' });
             } else if (Array.isArray(output.target.buffer)) {
+                console.log("Buffer is Array - converting to Uint8Array");
                 finalBlob = new Blob([new Uint8Array(output.target.buffer)], { type: 'video/mp4' });
             } else {
-                throw new Error(`Unexpected buffer type: ${typeof output.target.buffer}`);
+                const bufferType = typeof output.target.buffer;
+                console.error("Unknown buffer type:", bufferType);
+                throw new Error(`Unexpected buffer type: ${bufferType}`);
             }
 
-            console.log("Final blob size:", finalBlob.size);
+            console.log("✓ Final blob created - size:", finalBlob.size, "bytes");
+
+            if (finalBlob.size < 200) {
+                console.warn("⚠️  Blob is very small (likely just MP4 header, no video data encoded)");
+            }
+
             document.getElementById('outputVideo').src = URL.createObjectURL(finalBlob);
+            console.log("✓ Output video src set");
 
             status.textContent = "Success! Video generated locally.";
             processBtn.disabled = false;
+            console.log("=== PIPELINE COMPLETE ===");
         }
     </script>
 </body>
