@@ -45,6 +45,11 @@
         </div>
     </div>
 
+    <div id="shareButtons" style="display:none; text-align: center; margin-top: 2rem; gap: 1rem;">
+        <button id="downloadBtn" style="background: #25d366; margin: 0 0.5rem;">⬇️ Download Video</button>
+        <button id="whatsappBtn" style="background: #25d366; margin: 0 0.5rem;">💬 Share to WhatsApp</button>
+    </div>
+
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script type="module">
@@ -67,8 +72,12 @@
         const status = document.getElementById('status');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d', { alpha: false });
+        const downloadBtn = document.getElementById('downloadBtn');
+        const whatsappBtn = document.getElementById('whatsappBtn');
+        const shareButtons = document.getElementById('shareButtons');
 
         let selectedFile = null;
+        let outputBlob = null;
 
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length) {
@@ -234,13 +243,60 @@
                 console.warn("⚠️  Blob is very small (likely just MP4 header, no video data encoded)");
             }
 
-            document.getElementById('outputVideo').src = URL.createObjectURL(finalBlob);
+            const videoUrl = URL.createObjectURL(finalBlob);
+            document.getElementById('outputVideo').src = videoUrl;
             console.log("✓ Output video src set");
 
-            status.textContent = "Success! Video generated locally.";
+            // Store blob for sharing and downloading
+            outputBlob = finalBlob;
+            shareButtons.style.display = 'flex';
+
+            status.textContent = "Success! Video generated locally. Share or download below.";
             processBtn.disabled = false;
             console.log("=== PIPELINE COMPLETE ===");
         }
+
+        // Download button handler
+        downloadBtn.addEventListener('click', () => {
+            if (!outputBlob) return;
+            const url = URL.createObjectURL(outputBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `caption-burn-${new Date().getTime()}.mp4`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            console.log("✓ Video downloaded");
+        });
+
+        // WhatsApp share button handler
+        whatsappBtn.addEventListener('click', async () => {
+            if (!outputBlob) return;
+
+            // Check if Web Share API is available (for mobile)
+            if (navigator.share && navigator.canShare && navigator.canShare({ files: [outputBlob] })) {
+                try {
+                    await navigator.share({
+                        files: [new File([outputBlob], 'caption-burn-video.mp4', { type: 'video/mp4' })],
+                        title: 'Caption Burned Video',
+                        text: 'Check out this video with burned-in captions!'
+                    });
+                    console.log("✓ Shared via Web Share API");
+                } catch (err) {
+                    console.error("Share error:", err);
+                }
+            } else {
+                // Fallback: Open WhatsApp Web with a message
+                const text = "Check out this video with burned-in captions! Generated with Caption Burner 🔥";
+                const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+                window.open(whatsappUrl, '_blank');
+                console.log("✓ Opened WhatsApp Web");
+
+                // Show instructions
+                status.textContent = "WhatsApp Web opened! Paste the video file into the chat. To attach the file, use the download button first.";
+            }
+        });
     </script>
 </body>
 </html>
