@@ -93,6 +93,7 @@
             Mp4OutputFormat, 
             CanvasSource,
             VideoSampleSink,
+            MediaStreamSource,
             ALL_FORMATS 
         } from 'https://esm.sh/mediabunny@1.25.8';
 
@@ -423,6 +424,28 @@
                         duration = 10;
                     }
                 }
+
+                // SETUP HLS AUDIO
+                // We capture the stream from the video element to get the audio track
+                try {
+                    console.log("Capturing stream from video element for audio...");
+                    // captureStream() might be experimental in some browsers or require 'mozCaptureStream'
+                    const stream = tempVideo.captureStream ? tempVideo.captureStream() : tempVideo.mozCaptureStream();
+                    
+                    if (stream) {
+                        // Create a MediaStreamSource wrapper for mediabunny
+                        const msSource = new MediaStreamSource(stream);
+                        // Get track from this source wrapper
+                        input = new Input({ source: msSource, formats: ALL_FORMATS });
+                        audioTrack = await input.getPrimaryAudioTrack();
+                        console.log("Captured HLS audio track via MediaStreamSource");
+                    } else {
+                        console.warn("captureStream not supported, HLS will be silent.");
+                    }
+                } catch (err) {
+                    console.warn("Failed to capture HLS stream:", err);
+                }
+
             } else {
                 throw new Error('Unknown source type: ' + sourceType);
             }
@@ -439,6 +462,29 @@
             // 2. Setup Canvas based on video dimensions
             canvas.width = displayWidth;
             canvas.height = displayHeight;
+
+            // Helper function for drawing
+            function drawFrameAndBurn(vid, text, w, h) {
+                // Draw video frame to canvas
+                ctx.drawImage(vid, 0, 0, w, h);
+
+                // Draw Caption Text Overlay with adaptive positioning
+                const aspectRatio = w / h;
+                const isVertical = aspectRatio < 1;
+
+                const fontSize = isVertical ? h * 0.06 : h * 0.08;
+                ctx.font = `bold ${Math.floor(fontSize)}px sans-serif`;
+                ctx.fillStyle = '#ffffff';
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = Math.max(2, h * 0.005);
+                ctx.textAlign = 'center';
+
+                const x = w / 2;
+                const y = isVertical ? h - (h * 0.3) : h - (h * 0.1);
+
+                ctx.strokeText(text, x, y);
+                ctx.fillText(text, x, y);
+            }
 
             // 4. Setup Mediabunny Output (Writer/Muxer)
             const output = new Output({
@@ -473,70 +519,119 @@
 
             console.log("=== STARTING VIDEO ENCODING ===");
 
-            // 7. Capture frames from video element instead of using VideoSampleSink
+            // 7. Processing Loop (Dual Strategy)
             let frameCount = 0;
-            const frameDuration = 1 / frameRate;
             const totalFrames = Math.ceil(duration * frameRate);
 
-            console.log(`Will encode ~${totalFrames} frames at ${frameRate} FPS`);
+            if (sourceType === 'file') {
+                // STRATEGY A: Seek-and-Snapshot (Fastest for files)
+                // Files allow random access, so we can seek efficiently.
+                console.log(`Using 'Seek-and-Snapshot' strategy for File. ~${totalFrames} frames.`);
+                
+                const frameDuration = 1 / frameRate;
 
-            for (let f = 0; f < totalFrames; f++) {
-                try {
-                    // Seek to frame time
-                    const frameTime = f / frameRate;
-                    tempVideo.currentTime = frameTime;
+                for (let f = 0; f < totalFrames; f++) {
+                    try {
+                        // Seek to frame time
+                        const frameTime = f / frameRate;
+                        tempVideo.currentTime = frameTime;
 
-                    // Wait for frame to be seeked
-                    await new Promise((resolve) => {
-                        const checkReady = () => {
-                            if (Math.abs(tempVideo.currentTime - frameTime) < 0.001) {
-                                tempVideo.removeEventListener('seeked', checkReady);
-                                resolve();
-                            }
-                        };
-                        tempVideo.addEventListener('seeked', checkReady, { once: true });
-                        // Fallback timeout in case seek doesn't fire
-                        setTimeout(resolve, 50);
-                    });
+                        // Wait for frame to be seeked
+                        await new Promise((resolve) => {
+                            const checkReady = () => {
+                                if (Math.abs(tempVideo.currentTime - frameTime) < 0.001) {
+                                    tempVideo.removeEventListener('seeked', checkReady);
+                                    resolve();
+                                }
+                            };
+                            tempVideo.addEventListener('seeked', checkReady, { once: true });
+                            // Fallback timeout in case seek doesn't fire
+                            setTimeout(resolve, 50);
+                        });
 
-                    // Draw video frame to canvas
-                    ctx.drawImage(tempVideo, 0, 0, canvas.width, canvas.height);
+                        // Draw and Burn
+                        drawFrameAndBurn(tempVideo, textToBurn, displayWidth, displayHeight);
 
-                    // Draw Caption Text Overlay with adaptive positioning for vertical/horizontal videos
-                    const aspectRatio = canvas.width / canvas.height;
-                    const isVertical = aspectRatio < 1; // Vertical if width < height (e.g., 9:16)
+                        // Add frame to encoder
+                        await videoSource.add(frameTime, frameDuration);
+                        frameCount++;
 
-                    // Scale font size based on video orientation
-                    const fontSize = isVertical ? canvas.height * 0.06 : canvas.height * 0.08;
-                    ctx.font = `bold ${Math.floor(fontSize)}px sans-serif`;
-                    ctx.fillStyle = '#ffffff';
-                    ctx.strokeStyle = '#000000';
-                    ctx.lineWidth = Math.max(2, canvas.height * 0.005);
-                    ctx.textAlign = 'center';
-
-                    const x = canvas.width / 2;
-                    // For vertical videos: position caption higher (30% from bottom instead of 10%)
-                    // For horizontal videos: keep at bottom (10% from bottom)
-                    const y = isVertical ? canvas.height - (canvas.height * 0.3) : canvas.height - (canvas.height * 0.1);
-
-                    ctx.strokeText(textToBurn, x, y);
-                    ctx.fillText(textToBurn, x, y);
-
-                    // Add frame to encoder
-                    await videoSource.add(frameTime, frameDuration);
-                    frameCount++;
-
-                    if (frameCount % 30 === 0) {
-                        status.textContent = `Processing: ${frameCount} frames completed...`;
+                        if (frameCount % 30 === 0) {
+                            status.textContent = `Processing: ${frameCount} / ${totalFrames} frames...`;
+                        }
+                    } catch (err) {
+                        console.error(`Error processing frame ${f}:`, err);
+                        throw err;
                     }
-                } catch (err) {
-                    console.error(`Error processing frame ${f}:`, err);
-                    throw err;
                 }
+            } else {
+                // STRATEGY B: Real-time Play-Through (Required for HLS)
+                // HLS seeking is inaccurate (skipping). We must play it to get smooth video + audio.
+                console.log("Using 'Play-Through' strategy for HLS (captures playback).");
+                
+                // Mute the video element so the user doesn't hear the fast playback process
+                tempVideo.muted = false; // Must be false to capture audio? No, captureStream captures even if muted, usually. 
+                // However, Chrome sometimes mutes captureStream if element is muted. 
+                // Let's keep it muted but cross fingers, or use volume=0.
+                tempVideo.volume = 0.0; 
+                
+                // Try to handle audio for HLS
+                // We need to feed audio data to mediabunny. 
+                // Since we added the track from the MediaStream (captureStream) earlier, 
+                // we just need to let the video play. The MediaStreamTrack we passed to output
+                // should automatically pipe data as long as the source is active.
+
+                // Setup frame capture loop
+                await new Promise((resolve, reject) => {
+                    let processing = true;
+                    
+                    const processFrame = async (now, metadata) => {
+                        if (!processing) return;
+                        
+                        try {
+                            // Check if we are done
+                            if (tempVideo.ended || tempVideo.currentTime >= duration) {
+                                console.log("HLS Playback finished or duration reached.");
+                                processing = false;
+                                tempVideo.pause();
+                                resolve();
+                                return;
+                            }
+
+                            // Draw and Burn
+                            drawFrameAndBurn(tempVideo, textToBurn, displayWidth, displayHeight);
+
+                            // Add frame to encoder
+                            // Use metadata.mediaTime for accurate sync
+                            const timestamp = metadata.mediaTime;
+                            const duration = 1 / frameRate; // Best guess for duration
+                            
+                            await videoSource.add(timestamp, duration);
+                            frameCount++;
+                            
+                            if (frameCount % 30 === 0) {
+                                status.textContent = `Recording HLS: ${frameCount} frames...`;
+                            }
+
+                            // Continue loop
+                            tempVideo.requestVideoFrameCallback(processFrame);
+                        } catch (e) {
+                            processing = false;
+                            reject(e);
+                        }
+                    };
+
+                    // Start playback
+                    tempVideo.requestVideoFrameCallback(processFrame);
+                    tempVideo.play().catch(e => {
+                        console.error("Auto-play failed:", e);
+                        reject(e);
+                    });
+                });
             }
 
             console.log("=== FRAME LOOP COMPLETE ===");
-            console.log("Total frames encoded:", frameCount, "out of ~", totalFrames);
+            console.log("Total frames encoded:", frameCount);
 
             // Close the video source to signal end of stream
             console.log("Closing video source...");
