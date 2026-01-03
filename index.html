@@ -436,9 +436,14 @@
                         const nativeAudioTrack = stream.getAudioTracks()[0];
                         if (nativeAudioTrack) {
                             // Use MediaStreamAudioTrackSource to encode the real-time audio
-                            // We attempt to use AAC (mp4a.40.2) for MP4 compatibility, though browser support varies.
-                            // If this fails, we might need to fallback to Opus and WebM container.
-                            audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack);
+                            // We use Opus as it is the standard for WebCodecs encoding in browsers.
+                            // AAC encoding support is still limited in browsers.
+                            audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
+                                codec: 'opus',
+                                sampleRate: 48000,
+                                numberOfChannels: 2,
+                                bitrate: 128000
+                            });
                             console.log("Captured HLS audio track via MediaStreamAudioTrackSource");
                         } else {
                             console.warn("Stream captured but no audio track found.");
