@@ -461,17 +461,32 @@
         whatsappBtn.addEventListener('click', async () => {
             if (!outputBlob) return;
 
+            const videoFile = new File([outputBlob], 'caption-burn-video.mp4', { type: 'video/mp4' });
+
             // Check if Web Share API is available (for mobile)
-            if (navigator.share && navigator.canShare && navigator.canShare({ files: [outputBlob] })) {
+            if (navigator.share && navigator.canShare) {
                 try {
-                    await navigator.share({
-                        files: [new File([outputBlob], 'caption-burn-video.mp4', { type: 'video/mp4' })],
-                        title: 'Caption Burned Video',
-                        text: 'Check out this video with burned-in captions!'
-                    });
-                    console.log("✓ Shared via Web Share API");
+                    // Test if files can be shared
+                    if (navigator.canShare({ files: [videoFile] })) {
+                        await navigator.share({
+                            files: [videoFile],
+                            title: 'Caption Burned Video',
+                            text: 'Check out this video with burned-in captions!'
+                        });
+                        console.log("✓ Shared via Web Share API");
+                        status.textContent = "Video shared to WhatsApp!";
+                    } else {
+                        // Files not supported, use text-only fallback
+                        throw new Error('File sharing not supported');
+                    }
                 } catch (err) {
-                    console.error("Share error:", err);
+                    console.log("Web Share API not available or failed, using WhatsApp Web fallback");
+                    // Fallback: Open WhatsApp Web with a message
+                    const text = "Check out this video with burned-in captions! Generated with Caption Burner 🔥";
+                    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+                    window.open(whatsappUrl, '_blank');
+                    console.log("✓ Opened WhatsApp Web");
+                    status.textContent = "WhatsApp Web opened! Download the video and attach it to your message.";
                 }
             } else {
                 // Fallback: Open WhatsApp Web with a message
@@ -481,7 +496,7 @@
                 console.log("✓ Opened WhatsApp Web");
 
                 // Show instructions
-                status.textContent = "WhatsApp Web opened! Paste the video file into the chat. To attach the file, use the download button first.";
+                status.textContent = "WhatsApp Web opened! Download the video and attach it to your message.";
             }
         });
     </script>
