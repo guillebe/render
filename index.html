@@ -55,7 +55,10 @@
 
         <div id="hls-tab" class="tab-content">
             <p class="info-text">Paste an HLS stream URL (must end with .m3u8)</p>
-            <input type="text" id="hlsUrlInput" value="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" placeholder="https://example.com/video.m3u8" /><br>
+            <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: center; margin: 15px 0;">
+                <input type="text" id="hlsUrlInput" value="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" placeholder="https://example.com/video.m3u8" style="width: 50%; margin: 0;" />
+                <button id="hlsLoadBtn" style="padding: 10px 20px; margin: 0;">Load</button>
+            </div>
         </div>
 
         <input type="text" id="captionText" value="CAPTION" placeholder="Enter caption text"><br>
@@ -98,6 +101,7 @@
 
         const fileInput = document.getElementById('fileInput');
         const hlsUrlInput = document.getElementById('hlsUrlInput');
+        const hlsLoadBtn = document.getElementById('hlsLoadBtn');
         const processBtn = document.getElementById('processBtn');
         const status = document.getElementById('status');
         const canvas = document.getElementById('canvas');
@@ -157,8 +161,9 @@
             }
         });
 
-        hlsUrlInput.addEventListener('change', async (e) => {
-            const url = e.target.value.trim();
+        // Helper to load HLS URL
+        async function loadHlsUrl(url) {
+            url = url.trim();
             if (url) {
                 // Validate URL format
                 if (!url.match(/^https?:\/\/.+\.m3u8$/i)) {
@@ -195,6 +200,14 @@
                 processBtn.disabled = true;
                 status.textContent = "Please select an MP4 file or HLS stream URL.";
             }
+        }
+
+        hlsUrlInput.addEventListener('change', async (e) => {
+            await loadHlsUrl(e.target.value);
+        });
+
+        hlsLoadBtn.addEventListener('click', async () => {
+            await loadHlsUrl(hlsUrlInput.value);
         });
 
         processBtn.addEventListener('click', async () => {
