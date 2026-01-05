@@ -232,7 +232,8 @@
         async function loadHlsPreview(url) {
             const previewVideo = document.getElementById('originalVideo');
 
-            // Check for native HLS support (Safari)
+            // For native HLS, just load the URL for playback
+            // Mediabunny will handle metadata reading in loadHlsSource
             if (previewVideo.canPlayType('application/vnd.apple.mpegurl')) {
                 previewVideo.src = url;
                 return new Promise((resolve) => {
@@ -278,32 +279,58 @@
 
         // HLS helper function to load source for processing
         async function loadHlsSource(url, videoElement) {
-            // Check for native HLS support (Safari)
+            // Check for native HLS support (Safari/iOS)
             if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                console.log("Using native HLS support");
                 videoElement.src = url;
+
                 return new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => reject(new Error('Metadata loading timeout')), 30000);
-                    videoElement.addEventListener('loadedmetadata', () => {
+                    const timeout = setTimeout(() => reject(new Error('Native HLS metadata loading timeout')), 30000);
+                    let settled = false;
+
+                    const cleanup = () => {
                         clearTimeout(timeout);
+                        videoElement.removeEventListener('loadedmetadata', checkDimensions);
+                        videoElement.removeEventListener('canplay', checkDimensions);
+                        videoElement.removeEventListener('playing', checkDimensions);
+                        videoElement.removeEventListener('error', handleError);
+                    };
+
+                    const checkDimensions = () => {
+                        if (settled) return;
+
                         const width = videoElement.videoWidth;
                         const height = videoElement.videoHeight;
 
-                        if (!width || !height || width <= 0 || height <= 0) {
-                            reject(new Error(`Invalid dimensions from native HLS: ${width}x${height}`));
-                            return;
+                        if (width > 0 && height > 0) {
+                            settled = true;
+                            cleanup();
+                            console.log(`Got native HLS dimensions: ${width}x${height}`);
+                            resolve({
+                                displayWidth: width,
+                                displayHeight: height,
+                                duration: videoElement.duration,
+                                hlsInstance: null
+                            });
                         }
+                    };
 
-                        resolve({
-                            displayWidth: width,
-                            displayHeight: height,
-                            duration: videoElement.duration,
-                            hlsInstance: null
-                        });
-                    }, { once: true });
-                    videoElement.addEventListener('error', () => {
-                        clearTimeout(timeout);
+                    const handleError = () => {
+                        if (settled) return;
+                        settled = true;
+                        cleanup();
                         reject(videoElement.error);
-                    }, { once: true });
+                    };
+
+                    // Try to get dimensions immediately (for cached/fast streams)
+                    checkDimensions();
+                    if (settled) return;
+
+                    // Listen to multiple events as iOS may fire them at different times
+                    videoElement.addEventListener('loadedmetadata', checkDimensions);
+                    videoElement.addEventListener('canplay', checkDimensions);
+                    videoElement.addEventListener('playing', checkDimensions);
+                    videoElement.addEventListener('error', handleError);
                 });
             }
 
