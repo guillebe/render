@@ -212,6 +212,10 @@
 
         processBtn.addEventListener('click', async () => {
             processBtn.disabled = true;
+            // Mute preview to prevent any potential audio leakage during processing
+            const originalVideo = document.getElementById('originalVideo');
+            const wasOriginalVideoMuted = originalVideo.muted;
+            originalVideo.muted = true;
             status.textContent = "Processing... do not close this tab.";
 
             console.log("=== PIPELINE START ===");
@@ -225,6 +229,9 @@
                 console.error("Error stack:", err.stack);
                 status.textContent = "Error: " + err.message;
                 processBtn.disabled = false;
+            } finally {
+                // Restore preview mute state
+                originalVideo.muted = wasOriginalVideoMuted;
             }
         });
 
@@ -537,29 +544,56 @@
 
                 // 3. Setup Audio
                 try {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    const mediaElementSource = audioContext.createMediaElementSource(tempVideo);
-                    const mediaStreamDestination = audioContext.createMediaStreamDestination();
-                    mediaElementSource.connect(mediaStreamDestination);
-                    mediaElementSource.connect(audioContext.destination);
+                    if (sourceType === 'hls') {
+                        // For HLS, use captureStream() to avoid audio playback and ensure audio capture
+                        console.log("Capturing HLS audio via captureStream...");
+                        const stream = tempVideo.captureStream ? tempVideo.captureStream() : tempVideo.mozCaptureStream();
 
-                    const audioStream = mediaStreamDestination.stream;
-                    const nativeAudioTrack = audioStream.getAudioTracks()[0];
+                        if (stream) {
+                            const nativeAudioTrack = stream.getAudioTracks()[0];
+                            if (nativeAudioTrack) {
+                                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                                console.log("System audio context sample rate:", audioContext.sampleRate);
 
-                    if (nativeAudioTrack) {
-                        console.log("System audio context sample rate:", audioContext.sampleRate);
-                        audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
-                            codec: 'opus',
-                            sampleRate: audioContext.sampleRate || 48000,
-                            numberOfChannels: 2,
-                            bitrate: 128000
-                        });
-                        console.log("✓ Captured audio track via Web Audio API");
+                                audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
+                                    codec: 'opus',
+                                    sampleRate: audioContext.sampleRate || 48000,
+                                    numberOfChannels: 2,
+                                    bitrate: 128000
+                                });
+                                console.log("✓ Captured HLS audio track via captureStream");
+                            } else {
+                                console.warn("HLS captureStream resulted in no audio track - output will be silent");
+                            }
+                        } else {
+                            console.warn("captureStream not supported - HLS output will be silent");
+                        }
                     } else {
-                        console.warn("Web Audio API capture resulted in no audio track - output will be silent");
+                        // For file uploads, use Web Audio API approach
+                        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        const mediaElementSource = audioContext.createMediaElementSource(tempVideo);
+                        const mediaStreamDestination = audioContext.createMediaStreamDestination();
+                        mediaElementSource.connect(mediaStreamDestination);
+                        mediaElementSource.connect(audioContext.destination);
+
+                        const audioStream = mediaStreamDestination.stream;
+                        const nativeAudioTrack = audioStream.getAudioTracks()[0];
+
+                        if (nativeAudioTrack) {
+                            console.log("System audio context sample rate:", audioContext.sampleRate);
+                            audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
+                                codec: 'opus',
+                                sampleRate: audioContext.sampleRate || 48000,
+                                numberOfChannels: 2,
+                                bitrate: 128000
+                            });
+                            console.log("✓ Captured file audio track via Web Audio API");
+                        } else {
+                            console.warn("Web Audio API capture resulted in no audio track - output will be silent");
+                        }
                     }
                 } catch (err) {
-                    console.warn("Failed to capture audio stream via Web Audio API:", err);
+                    console.warn("Failed to capture audio stream:", err);
                 }
 
                 // 4. Setup Output
@@ -614,7 +648,7 @@
                             frameCount++;
 
                             if (frameCount - lastLoggedFrame >= 30) {
-                                status.textContent = `Recording: ${frameCount} / ${totalFrames} frames...`;
+                                status.textContent = `Processing: ${frameCount} / ${totalFrames} frames...`;
                                 lastLoggedFrame = frameCount;
                             }
                             tempVideo.requestVideoFrameCallback(processFrame);
