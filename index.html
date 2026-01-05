@@ -252,7 +252,22 @@
 
             return new Promise((resolve, reject) => {
                 tempHls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    resolve();
+                    // On mobile, dimensions may not be available yet
+                    // Wait for loadedmetadata to ensure video is ready to play
+                    if (previewVideo.videoWidth === 0 || previewVideo.videoHeight === 0) {
+                        console.log("Waiting for video metadata in preview...");
+                        const metadataTimeout = setTimeout(() => {
+                            reject(new Error('Preview metadata timeout'));
+                        }, 5000);
+                        previewVideo.addEventListener('loadedmetadata', () => {
+                            clearTimeout(metadataTimeout);
+                            console.log(`Preview loaded: ${previewVideo.videoWidth}x${previewVideo.videoHeight}`);
+                            resolve();
+                        }, { once: true });
+                    } else {
+                        console.log(`Preview ready: ${previewVideo.videoWidth}x${previewVideo.videoHeight}`);
+                        resolve();
+                    }
                 });
                 tempHls.on(Hls.Events.ERROR, (event, data) => {
                     tempHls.destroy();
@@ -270,9 +285,17 @@
                     const timeout = setTimeout(() => reject(new Error('Metadata loading timeout')), 30000);
                     videoElement.addEventListener('loadedmetadata', () => {
                         clearTimeout(timeout);
+                        const width = videoElement.videoWidth;
+                        const height = videoElement.videoHeight;
+
+                        if (!width || !height || width <= 0 || height <= 0) {
+                            reject(new Error(`Invalid dimensions from native HLS: ${width}x${height}`));
+                            return;
+                        }
+
                         resolve({
-                            displayWidth: videoElement.videoWidth,
-                            displayHeight: videoElement.videoHeight,
+                            displayWidth: width,
+                            displayHeight: height,
                             duration: videoElement.duration,
                             hlsInstance: null
                         });
@@ -318,19 +341,35 @@
 
                         videoElement.addEventListener('loadedmetadata', () => {
                             clearTimeout(metadataTimeout);
-                            console.log(`Got dimensions from loadedmetadata: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+                            const width = videoElement.videoWidth;
+                            const height = videoElement.videoHeight;
+                            console.log(`Got dimensions from loadedmetadata: ${width}x${height}`);
+
+                            if (!width || !height || width <= 0 || height <= 0) {
+                                reject(new Error(`Invalid dimensions from HLS loadedmetadata: ${width}x${height}`));
+                                return;
+                            }
+
                             resolve({
-                                displayWidth: videoElement.videoWidth,
-                                displayHeight: videoElement.videoHeight,
+                                displayWidth: width,
+                                displayHeight: height,
                                 duration: videoElement.duration,
                                 hlsInstance: hls
                             });
                         }, { once: true });
                     } else {
-                        console.log(`Got dimensions from MANIFEST_PARSED: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+                        const width = videoElement.videoWidth;
+                        const height = videoElement.videoHeight;
+                        console.log(`Got dimensions from MANIFEST_PARSED: ${width}x${height}`);
+
+                        if (!width || !height || width <= 0 || height <= 0) {
+                            reject(new Error(`Invalid dimensions from HLS MANIFEST_PARSED: ${width}x${height}`));
+                            return;
+                        }
+
                         resolve({
-                            displayWidth: videoElement.videoWidth,
-                            displayHeight: videoElement.videoHeight,
+                            displayWidth: width,
+                            displayHeight: height,
                             duration: videoElement.duration,
                             hlsInstance: hls
                         });
