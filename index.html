@@ -545,8 +545,9 @@
                 // 3. Setup Audio
                 try {
                     if (sourceType === 'hls') {
-                        // For HLS, use captureStream() to avoid audio playback and ensure audio capture
-                        console.log("Capturing HLS audio via captureStream...");
+                        // For HLS, attempt captureStream() for audio capture
+                        // Note: captureStream() is not supported on iOS Safari, so HLS audio capture will fail on iOS
+                        console.log("Attempting to capture HLS audio via captureStream...");
                         const stream = tempVideo.captureStream ? tempVideo.captureStream() : tempVideo.mozCaptureStream();
 
                         if (stream) {
@@ -563,10 +564,10 @@
                                 });
                                 console.log("✓ Captured HLS audio track via captureStream");
                             } else {
-                                console.warn("HLS captureStream resulted in no audio track - output will be silent");
+                                console.warn("⚠️  HLS captureStream resulted in no audio track - output will be silent (known limitation on iOS Safari)");
                             }
                         } else {
-                            console.warn("captureStream not supported - HLS output will be silent");
+                            console.warn("⚠️  captureStream not supported - HLS output will be silent (iOS Safari does not support captureStream)");
                         }
                     } else {
                         // For file uploads, use Web Audio API approach
@@ -636,9 +637,12 @@
                         if (!processing) return;
                         try {
                             const currentTime = metadata.mediaTime || tempVideo.currentTime;
-                            if (frameCount >= totalFrames || tempVideo.ended || currentTime >= duration) {
+                            // Check video.ended first (most reliable), then frame count, with duration as fallback
+                            // Use small tolerance (0.1s) for duration check to account for floating point precision
+                            if (tempVideo.ended || frameCount >= totalFrames || currentTime >= (duration - 0.1)) {
                                 processing = false;
                                 tempVideo.pause();
+                                console.log(`Processing terminated: ended=${tempVideo.ended}, frameCount=${frameCount}/${totalFrames}, currentTime=${currentTime.toFixed(2)}s`);
                                 resolve();
                                 return;
                             }
