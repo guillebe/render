@@ -307,12 +307,34 @@
                     clearTimeout(timeout);
                     // Store instance for cleanup
                     hlsInstance = hls;
-                    resolve({
-                        displayWidth: videoElement.videoWidth,
-                        displayHeight: videoElement.videoHeight,
-                        duration: videoElement.duration,
-                        hlsInstance: hls
-                    });
+
+                    // On mobile, dimensions may not be available yet after MANIFEST_PARSED
+                    // Wait for loadedmetadata to ensure videoWidth/videoHeight are populated
+                    if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
+                        console.log("Waiting for video metadata to get dimensions...");
+                        const metadataTimeout = setTimeout(() => {
+                            reject(new Error('Video metadata timeout - dimensions still 0'));
+                        }, 5000);
+
+                        videoElement.addEventListener('loadedmetadata', () => {
+                            clearTimeout(metadataTimeout);
+                            console.log(`Got dimensions from loadedmetadata: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+                            resolve({
+                                displayWidth: videoElement.videoWidth,
+                                displayHeight: videoElement.videoHeight,
+                                duration: videoElement.duration,
+                                hlsInstance: hls
+                            });
+                        }, { once: true });
+                    } else {
+                        console.log(`Got dimensions from MANIFEST_PARSED: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+                        resolve({
+                            displayWidth: videoElement.videoWidth,
+                            displayHeight: videoElement.videoHeight,
+                            duration: videoElement.duration,
+                            hlsInstance: hls
+                        });
+                    }
                 });
 
                 hls.on(Hls.Events.ERROR, (event, data) => {
@@ -410,6 +432,11 @@
             if (duration > MAX_OUTPUT_DURATION) {
                 console.log(`Duration limited: ${duration.toFixed(2)}s → ${MAX_OUTPUT_DURATION}s`);
                 duration = MAX_OUTPUT_DURATION;
+            }
+
+            // Validate dimensions before using them
+            if (!displayWidth || !displayHeight || displayWidth <= 0 || displayHeight <= 0) {
+                throw new Error(`Invalid video dimensions: ${displayWidth}x${displayHeight}. Canvas size must be positive.`);
             }
 
             console.log("Video metadata:", { sourceType, displayWidth, displayHeight, duration: duration.toFixed(2) + 's' });
