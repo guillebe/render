@@ -444,8 +444,9 @@
 
             const tempVideo = document.createElement('video');
             tempVideo.crossOrigin = 'anonymous';
-            tempVideo.muted = false; // Important for audio capture
-            tempVideo.volume = 0.0;  // Mute for user but keep active for capture (hopefully)
+            tempVideo.muted = false; // Must be unmuted for Web Audio API to capture audio
+            tempVideo.playsInline = true; // Prevents fullscreen takeover on iOS
+            tempVideo.volume = 0.0;  // Set volume to 0 to "mute" it for the user
 
             if (sourceType === 'file') {
                 console.log("Loading file source into video element...");
@@ -548,46 +549,39 @@
                 ctx.fillText(text, x, y);
             }
 
-            // 3. Setup Audio for HLS (captureStream)
-            // For files, audioTrack is already extracted above
-            if (sourceType === 'hls') {
-                let audioContext = null;
-                try {
-                    console.log("Capturing stream from video element for HLS audio...");
-                    const stream = tempVideo.captureStream ? tempVideo.captureStream() : tempVideo.mozCaptureStream();
+            // 3. Setup Audio
+            // For HLS, we use Web Audio API to capture the stream since captureStream() isn't supported on iOS Safari
+            // For files, we will extract the audio track directly in a future step if possible, but for now, we use the same method for both
+            let audioContext = null;
+            let mediaElementSource = null;
+            let mediaStreamDestination = null;
 
-                    if (stream) {
-                        const nativeAudioTrack = stream.getAudioTracks()[0];
-                        if (nativeAudioTrack) {
-                            // Get actual audio context settings
-                            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                            console.log("System audio context sample rate:", audioContext.sampleRate);
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                mediaElementSource = audioContext.createMediaElementSource(tempVideo);
+                mediaStreamDestination = audioContext.createMediaStreamDestination();
+                mediaElementSource.connect(mediaStreamDestination);
+                mediaElementSource.connect(audioContext.destination); // Play audio through speakers to keep it alive
 
-                            // Create MediaStreamAudioTrackSource with system default settings
-                            audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
-                                codec: 'opus',
-                                sampleRate: audioContext.sampleRate || 48000,
-                                numberOfChannels: 2,
-                                bitrate: 128000
-                            });
-                            console.log("✓ Captured HLS audio track");
-                        } else {
-                            console.warn("HLS stream captured but no audio track found - output will be silent");
-                            audioTrack = null;
-                        }
-                    } else {
-                        console.warn("captureStream not supported - HLS output will be silent");
-                        audioTrack = null;
-                    }
-                } catch (err) {
-                    console.warn("Failed to capture HLS audio stream:", err);
+                const audioStream = mediaStreamDestination.stream;
+                const nativeAudioTrack = audioStream.getAudioTracks()[0];
+
+                if (nativeAudioTrack) {
+                    console.log("System audio context sample rate:", audioContext.sampleRate);
+                    audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
+                        codec: 'opus',
+                        sampleRate: audioContext.sampleRate || 48000,
+                        numberOfChannels: 2,
+                        bitrate: 128000
+                    });
+                    console.log("✓ Captured audio track via Web Audio API");
+                } else {
+                    console.warn("Web Audio API capture resulted in no audio track - output will be silent");
                     audioTrack = null;
-                } finally {
-                    // Ensure AudioContext is always closed to prevent resource leak
-                    if (audioContext) {
-                        audioContext.close();
-                    }
                 }
+            } catch (err) {
+                console.warn("Failed to capture audio stream via Web Audio API:", err);
+                audioTrack = null;
             }
 
             // 4. Setup Output
@@ -747,6 +741,12 @@
                 console.log("Cleaning up HLS instance...");
                 currentHlsInstance.destroy();
                 hlsInstance = null;
+            }
+
+            // Cleanup AudioContext
+            if (audioContext) {
+                console.log("Closing AudioContext...");
+                audioContext.close();
             }
 
             console.log("=== PIPELINE COMPLETE ===");
