@@ -544,29 +544,30 @@
 
                 // 3. Setup Audio
                 try {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    const mediaElementSource = audioContext.createMediaElementSource(tempVideo);
-                    const mediaStreamDestination = audioContext.createMediaStreamDestination();
-                    mediaElementSource.connect(mediaStreamDestination);
-                    mediaElementSource.connect(audioContext.destination);
+                    console.log("Setting up audio capture via captureStream...");
+                    const stream = tempVideo.captureStream ? tempVideo.captureStream() : tempVideo.mozCaptureStream();
 
-                    const audioStream = mediaStreamDestination.stream;
-                    const nativeAudioTrack = audioStream.getAudioTracks()[0];
+                    if (stream) {
+                        const nativeAudioTrack = stream.getAudioTracks()[0];
+                        if (nativeAudioTrack) {
+                            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                            console.log("System audio context sample rate:", audioContext.sampleRate);
 
-                    if (nativeAudioTrack) {
-                        console.log("System audio context sample rate:", audioContext.sampleRate);
-                        audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
-                            codec: 'opus',
-                            sampleRate: audioContext.sampleRate || 48000,
-                            numberOfChannels: 2,
-                            bitrate: 128000
-                        });
-                        console.log("✓ Captured audio track via Web Audio API");
+                            audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
+                                codec: 'opus',
+                                sampleRate: audioContext.sampleRate || 48000,
+                                numberOfChannels: 2,
+                                bitrate: 128000
+                            });
+                            console.log("✓ Captured audio track via captureStream");
+                        } else {
+                            console.warn("captureStream resulted in no audio track - output will be silent");
+                        }
                     } else {
-                        console.warn("Web Audio API capture resulted in no audio track - output will be silent");
+                        console.warn("captureStream not supported - output will be silent");
                     }
                 } catch (err) {
-                    console.warn("Failed to capture audio stream via Web Audio API:", err);
+                    console.warn("Failed to capture audio stream:", err);
                 }
 
                 // 4. Setup Output
