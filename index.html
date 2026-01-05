@@ -454,9 +454,9 @@
 
                 const tempVideo = document.createElement('video');
                 tempVideo.crossOrigin = 'anonymous';
-                tempVideo.muted = false; // Must be unmuted for Web Audio API to capture audio
+                tempVideo.muted = true; // Prevents audio playback while still allowing audio capture
                 tempVideo.playsInline = true; // Prevents fullscreen takeover on iOS
-                tempVideo.volume = 0.0;  // Set volume to 0 to "mute" it for the user
+                tempVideo.volume = 0.0;
 
                 if (sourceType === 'file') {
                     console.log("Loading file source into video element...");
@@ -573,8 +573,8 @@
                         audioContext = new (window.AudioContext || window.webkitAudioContext)();
                         const mediaElementSource = audioContext.createMediaElementSource(tempVideo);
                         const mediaStreamDestination = audioContext.createMediaStreamDestination();
+                        // Only connect to mediaStreamDestination to capture audio, NOT to speakers
                         mediaElementSource.connect(mediaStreamDestination);
-                        mediaElementSource.connect(audioContext.destination);
 
                         const audioStream = mediaStreamDestination.stream;
                         const nativeAudioTrack = audioStream.getAudioTracks()[0];
