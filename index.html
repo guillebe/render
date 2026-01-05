@@ -216,7 +216,7 @@
             const originalVideo = document.getElementById('originalVideo');
             const wasOriginalVideoMuted = originalVideo.muted;
             originalVideo.muted = true;
-            status.textContent = "Generating... do not close this tab.";
+            status.textContent = "Processing... do not close this tab.";
 
             console.log("=== PIPELINE START ===");
             try {
@@ -648,7 +648,7 @@
                             frameCount++;
 
                             if (frameCount - lastLoggedFrame >= 30) {
-                                status.textContent = `Generating: ${frameCount} / ${totalFrames} frames...`;
+                                status.textContent = `Processing: ${frameCount} / ${totalFrames} frames...`;
                                 lastLoggedFrame = frameCount;
                             }
                             tempVideo.requestVideoFrameCallback(processFrame);
