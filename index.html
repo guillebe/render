@@ -331,6 +331,25 @@
                     // Store instance for cleanup
                     hlsInstance = hls;
 
+                    // Helper to validate and resolve with dimensions
+                    const resolveWithDimensions = (source) => {
+                        const width = videoElement.videoWidth;
+                        const height = videoElement.videoHeight;
+                        console.log(`Got dimensions from ${source}: ${width}x${height}`);
+
+                        if (!width || !height || width <= 0 || height <= 0) {
+                            reject(new Error(`Invalid dimensions from HLS ${source}: ${width}x${height}`));
+                            return;
+                        }
+
+                        resolve({
+                            displayWidth: width,
+                            displayHeight: height,
+                            duration: videoElement.duration,
+                            hlsInstance: hls
+                        });
+                    };
+
                     // On mobile, dimensions may not be available yet after MANIFEST_PARSED
                     // Wait for loadedmetadata to ensure videoWidth/videoHeight are populated
                     if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
@@ -341,38 +360,10 @@
 
                         videoElement.addEventListener('loadedmetadata', () => {
                             clearTimeout(metadataTimeout);
-                            const width = videoElement.videoWidth;
-                            const height = videoElement.videoHeight;
-                            console.log(`Got dimensions from loadedmetadata: ${width}x${height}`);
-
-                            if (!width || !height || width <= 0 || height <= 0) {
-                                reject(new Error(`Invalid dimensions from HLS loadedmetadata: ${width}x${height}`));
-                                return;
-                            }
-
-                            resolve({
-                                displayWidth: width,
-                                displayHeight: height,
-                                duration: videoElement.duration,
-                                hlsInstance: hls
-                            });
+                            resolveWithDimensions('loadedmetadata');
                         }, { once: true });
                     } else {
-                        const width = videoElement.videoWidth;
-                        const height = videoElement.videoHeight;
-                        console.log(`Got dimensions from MANIFEST_PARSED: ${width}x${height}`);
-
-                        if (!width || !height || width <= 0 || height <= 0) {
-                            reject(new Error(`Invalid dimensions from HLS MANIFEST_PARSED: ${width}x${height}`));
-                            return;
-                        }
-
-                        resolve({
-                            displayWidth: width,
-                            displayHeight: height,
-                            duration: videoElement.duration,
-                            hlsInstance: hls
-                        });
+                        resolveWithDimensions('MANIFEST_PARSED');
                     }
                 });
 
@@ -492,24 +483,16 @@
             if (finalWidth > MAX_CANVAS_WIDTH || finalHeight > MAX_CANVAS_HEIGHT || (finalWidth * finalHeight) > MAX_CANVAS_AREA) {
                 console.warn(`Video dimensions ${displayWidth}x${displayHeight} exceed mobile canvas limits. Scaling down...`);
 
-                // Scale proportionally to fit constraints
-                const aspectRatio = displayWidth / displayHeight;
-                const areaExceeded = (displayWidth * displayHeight) > MAX_CANVAS_AREA;
-                const widthExceeded = displayWidth > MAX_CANVAS_WIDTH;
-                const heightExceeded = displayHeight > MAX_CANVAS_HEIGHT;
+                // Calculate scale factors for each constraint
+                const scaleX = displayWidth > MAX_CANVAS_WIDTH ? MAX_CANVAS_WIDTH / displayWidth : 1;
+                const scaleY = displayHeight > MAX_CANVAS_HEIGHT ? MAX_CANVAS_HEIGHT / displayHeight : 1;
+                const scaleArea = (displayWidth * displayHeight) > MAX_CANVAS_AREA ? Math.sqrt(MAX_CANVAS_AREA / (displayWidth * displayHeight)) : 1;
 
-                if (areaExceeded) {
-                    // Scale based on area limit
-                    const maxSide = Math.sqrt(MAX_CANVAS_AREA / (aspectRatio < 1 ? aspectRatio : 1 / aspectRatio));
-                    finalWidth = Math.floor(aspectRatio >= 1 ? maxSide : maxSide * aspectRatio);
-                    finalHeight = Math.floor(aspectRatio >= 1 ? maxSide / aspectRatio : maxSide);
-                } else if (widthExceeded) {
-                    finalWidth = MAX_CANVAS_WIDTH;
-                    finalHeight = Math.floor(MAX_CANVAS_WIDTH / aspectRatio);
-                } else if (heightExceeded) {
-                    finalHeight = MAX_CANVAS_HEIGHT;
-                    finalWidth = Math.floor(MAX_CANVAS_HEIGHT * aspectRatio);
-                }
+                // Use the most restrictive scale factor that satisfies all constraints
+                const scale = Math.min(scaleX, scaleY, scaleArea);
+
+                finalWidth = Math.floor(displayWidth * scale);
+                finalHeight = Math.floor(displayHeight * scale);
 
                 console.log(`Scaled canvas to ${finalWidth}x${finalHeight} (from ${displayWidth}x${displayHeight})`);
             }
@@ -521,7 +504,7 @@
             canvas.height = finalHeight;
 
             // Helper function for drawing
-            function drawFrameAndBurn(vid, text, w, h) {
+            function drawFrameAndBurn(vid, text) {
                 // Draw video frame scaled to canvas size
                 ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
                 const aspectRatio = canvas.width / canvas.height;
@@ -650,7 +633,7 @@
                         }
 
                         // Draw and Burn
-                        drawFrameAndBurn(tempVideo, textToBurn, displayWidth, displayHeight);
+                        drawFrameAndBurn(tempVideo, textToBurn);
 
                         // Add frame to encoder
                         await videoSource.add(currentTime, frameDuration);
