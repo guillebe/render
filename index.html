@@ -496,10 +496,12 @@
 
             await output.start();
 
-            console.log("=== STARTING RECORDING (Play-Through) ===");
-
-            // 7. Processing Loop (Unified Play-Through)
+            // 7. Processing Loop (Play-Through for both file and HLS)
             let frameCount = 0;
+            const frameDuration = 1 / frameRate;
+            const totalFrames = Math.ceil(duration * frameRate);
+
+            console.log(`=== STARTING PLAY-THROUGH (${totalFrames} frames expected) ===`);
 
             // Monitor for video source errors
             if (videoSource.errorPromise) {
@@ -511,14 +513,33 @@
 
             await new Promise((resolve, reject) => {
                 let processing = true;
+                let lastLoggedFrame = 0;
 
                 const processFrame = async (now, metadata) => {
                     if (!processing) return;
 
                     try {
-                        // Check termination
-                        if (tempVideo.ended || tempVideo.currentTime >= duration) {
-                            console.log("Playback finished or duration reached.");
+                        const currentTime = metadata.mediaTime || tempVideo.currentTime;
+
+                        // Check termination conditions
+                        if (frameCount >= totalFrames) {
+                            console.log(`Reached frame limit: ${frameCount} / ${totalFrames}`);
+                            processing = false;
+                            tempVideo.pause();
+                            resolve();
+                            return;
+                        }
+
+                        if (tempVideo.ended) {
+                            console.log(`Video ended at frame ${frameCount}`);
+                            processing = false;
+                            tempVideo.pause();
+                            resolve();
+                            return;
+                        }
+
+                        if (currentTime >= duration) {
+                            console.log(`Duration reached: ${currentTime.toFixed(2)}s >= ${duration}s at frame ${frameCount}`);
                             processing = false;
                             tempVideo.pause();
                             resolve();
@@ -529,38 +550,31 @@
                         drawFrameAndBurn(tempVideo, textToBurn, displayWidth, displayHeight);
 
                         // Add frame to encoder
-                        // Use metadata.mediaTime if available (VideoFrameCallback), else fallback
-                        // Note: metadata.mediaTime is the presentation time in seconds.
-                        const timestamp = metadata.mediaTime;
-                        // For duration, we can estimate based on frameRate or delta.
-                        // CanvasSource expects explicit duration.
-                        // Ideally we use (current - last) but '1/frameRate' is smooth enough for CFR output.
-                        const frameDuration = 1 / frameRate;
-
-                        await videoSource.add(timestamp, frameDuration);
+                        await videoSource.add(currentTime, frameDuration);
                         frameCount++;
 
-                        if (frameCount % 30 === 0) {
-                            status.textContent = `Recording: ${frameCount} frames...`;
+                        if (frameCount - lastLoggedFrame >= 30) {
+                            status.textContent = `Recording: ${frameCount} / ${totalFrames} frames...`;
+                            lastLoggedFrame = frameCount;
+                            console.log(`Frame ${frameCount} at ${currentTime.toFixed(2)}s`);
                         }
 
                         // Continue
                         tempVideo.requestVideoFrameCallback(processFrame);
                     } catch (e) {
+                        console.error("Frame processing error:", e);
                         processing = false;
                         reject(e);
                     }
                 };
 
                 // Start playback
-                // Ensure we catch the first frame
                 tempVideo.requestVideoFrameCallback(processFrame);
-
                 tempVideo.play().catch(e => {
                     console.error("Auto-play failed:", e);
                     reject(e);
                 });
-            });
+            }
 
             console.log("=== RECORDING COMPLETE ===");
             console.log("Total frames encoded:", frameCount);
