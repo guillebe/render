@@ -132,11 +132,11 @@
                 if (tabId === 'file-tab') {
                     hlsUrl = null;
                     sourceType = null;
-                    processBtn.disabled = selectedFile ? false : true;
+                    processBtn.disabled = !selectedFile;
                 } else {
                     selectedFile = null;
                     sourceType = null;
-                    processBtn.disabled = hlsUrl ? false : true;
+                    processBtn.disabled = !hlsUrl;
                 }
             });
         });
@@ -438,6 +438,7 @@
             // 3. Setup Audio for HLS (captureStream)
             // For files, audioTrack is already extracted above
             if (sourceType === 'hls') {
+                let audioContext = null;
                 try {
                     console.log("Capturing stream from video element for HLS audio...");
                     const stream = tempVideo.captureStream ? tempVideo.captureStream() : tempVideo.mozCaptureStream();
@@ -446,7 +447,7 @@
                         const nativeAudioTrack = stream.getAudioTracks()[0];
                         if (nativeAudioTrack) {
                             // Get actual audio context settings
-                            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                            audioContext = new (window.AudioContext || window.webkitAudioContext)();
                             console.log("System audio context sample rate:", audioContext.sampleRate);
 
                             // Create MediaStreamAudioTrackSource with system default settings
@@ -457,7 +458,6 @@
                                 bitrate: 128000
                             });
                             console.log("✓ Captured HLS audio track");
-                            audioContext.close();
                         } else {
                             console.warn("HLS stream captured but no audio track found - output will be silent");
                             audioTrack = null;
@@ -469,6 +469,11 @@
                 } catch (err) {
                     console.warn("Failed to capture HLS audio stream:", err);
                     audioTrack = null;
+                } finally {
+                    // Ensure AudioContext is always closed to prevent resource leak
+                    if (audioContext) {
+                        audioContext.close();
+                    }
                 }
             }
 
