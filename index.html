@@ -128,13 +128,15 @@
                 const tabId = tab.getAttribute('data-tab');
                 document.getElementById(tabId).classList.add('active');
 
-                // Clear the other input
+                // Clear selection but preserve input values for persistence
                 if (tabId === 'file-tab') {
-                    hlsUrlInput.value = '';
                     hlsUrl = null;
+                    sourceType = null;
+                    processBtn.disabled = !selectedFile;
                 } else {
-                    fileInput.value = '';
                     selectedFile = null;
+                    sourceType = null;
+                    processBtn.disabled = !hlsUrl;
                 }
             });
         });
@@ -433,31 +435,46 @@
                 ctx.fillText(text, x, y);
             }
 
-            // 3. Setup Audio (Unified via captureStream)
-            try {
-                console.log("Capturing stream from video element for audio...");
-                // Note: For this to work with 'volume = 0.0', we rely on the browser implementing captureStream before volume gain.
-                // If this results in silent audio, we might need to set volume=1 and use a muted audio context destination to hide it from user.
-                const stream = tempVideo.captureStream ? tempVideo.captureStream() : tempVideo.mozCaptureStream();
-                
-                if (stream) {
-                    const nativeAudioTrack = stream.getAudioTracks()[0];
-                    if (nativeAudioTrack) {
-                        audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
-                            codec: 'opus',
-                            sampleRate: 48000,
-                            numberOfChannels: 2,
-                            bitrate: 128000
-                        });
-                        console.log("✓ Captured audio track");
+            // 3. Setup Audio for HLS (captureStream)
+            // For files, audioTrack is already extracted above
+            if (sourceType === 'hls') {
+                let audioContext = null;
+                try {
+                    console.log("Capturing stream from video element for HLS audio...");
+                    const stream = tempVideo.captureStream ? tempVideo.captureStream() : tempVideo.mozCaptureStream();
+
+                    if (stream) {
+                        const nativeAudioTrack = stream.getAudioTracks()[0];
+                        if (nativeAudioTrack) {
+                            // Get actual audio context settings
+                            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                            console.log("System audio context sample rate:", audioContext.sampleRate);
+
+                            // Create MediaStreamAudioTrackSource with system default settings
+                            audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
+                                codec: 'opus',
+                                sampleRate: audioContext.sampleRate || 48000,
+                                numberOfChannels: 2,
+                                bitrate: 128000
+                            });
+                            console.log("✓ Captured HLS audio track");
+                        } else {
+                            console.warn("HLS stream captured but no audio track found - output will be silent");
+                            audioTrack = null;
+                        }
                     } else {
-                        console.warn("Stream captured but no audio track found.");
+                        console.warn("captureStream not supported - HLS output will be silent");
+                        audioTrack = null;
                     }
-                } else {
-                    console.warn("captureStream not supported.");
+                } catch (err) {
+                    console.warn("Failed to capture HLS audio stream:", err);
+                    audioTrack = null;
+                } finally {
+                    // Ensure AudioContext is always closed to prevent resource leak
+                    if (audioContext) {
+                        audioContext.close();
+                    }
                 }
-            } catch (err) {
-                console.warn("Failed to capture audio stream:", err);
             }
 
             // 4. Setup Output
@@ -483,13 +500,21 @@
 
             // 7. Processing Loop (Unified Play-Through)
             let frameCount = 0;
-            
+
+            // Monitor for video source errors
+            if (videoSource.errorPromise) {
+                videoSource.errorPromise.catch(err => {
+                    console.error("Video source error:", err);
+                    throw err;
+                });
+            }
+
             await new Promise((resolve, reject) => {
                 let processing = true;
-                
+
                 const processFrame = async (now, metadata) => {
                     if (!processing) return;
-                    
+
                     try {
                         // Check termination
                         if (tempVideo.ended || tempVideo.currentTime >= duration) {
@@ -510,11 +535,11 @@
                         // For duration, we can estimate based on frameRate or delta.
                         // CanvasSource expects explicit duration.
                         // Ideally we use (current - last) but '1/frameRate' is smooth enough for CFR output.
-                        const frameDuration = 1 / frameRate; 
-                        
+                        const frameDuration = 1 / frameRate;
+
                         await videoSource.add(timestamp, frameDuration);
                         frameCount++;
-                        
+
                         if (frameCount % 30 === 0) {
                             status.textContent = `Recording: ${frameCount} frames...`;
                         }
@@ -530,7 +555,7 @@
                 // Start playback
                 // Ensure we catch the first frame
                 tempVideo.requestVideoFrameCallback(processFrame);
-                
+
                 tempVideo.play().catch(e => {
                     console.error("Auto-play failed:", e);
                     reject(e);
