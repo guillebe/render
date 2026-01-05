@@ -437,319 +437,235 @@
         }
 
         async function runPipeline(sourceType, source, textToBurn) {
-            // 1. Load metadata based on source type
-            let displayWidth, displayHeight, duration, frameRate;
             let currentHlsInstance = null;
-            let audioTrack = null; // Audio track reference
-
-            const tempVideo = document.createElement('video');
-            tempVideo.crossOrigin = 'anonymous';
-            tempVideo.muted = false; // Must be unmuted for Web Audio API to capture audio
-            tempVideo.playsInline = true; // Prevents fullscreen takeover on iOS
-            tempVideo.volume = 0.0;  // Set volume to 0 to "mute" it for the user
-
-            if (sourceType === 'file') {
-                console.log("Loading file source into video element...");
-                tempVideo.src = URL.createObjectURL(source);
-
-                // Wait for metadata
-                const videoMeta = await getVideoMetadata(tempVideo);
-                displayWidth = videoMeta.width;
-                displayHeight = videoMeta.height;
-                duration = videoMeta.duration;
-                frameRate = 30; // Default to 30 as we can't easily read file FPS without parsing, or we could use VideoPlaybackQuality
-                
-                // Note: For files, we could assume 30 or try to detect. 
-                // Since we are capturing playback, we are effectively resampling to whatever we drive the loop at.
-                // We'll drive the loop at the video's natural pace (requestVideoFrameCallback).
-                
-            } else if (sourceType === 'hls') {
-                console.log("Loading HLS source...");
-                const metadata = await loadHlsSource(source, tempVideo);
-                displayWidth = metadata.displayWidth;
-                displayHeight = metadata.displayHeight;
-                duration = metadata.duration || 10;
-                frameRate = 30;
-                currentHlsInstance = metadata.hlsInstance;
-
-                if (!isFinite(duration) || duration <= 0) {
-                    try {
-                        const videoMeta = await getVideoMetadata(tempVideo);
-                        duration = videoMeta.duration;
-                    } catch (err) {
-                        console.error("Failed to get duration:", err);
-                        duration = 10;
-                    }
-                }
-            } else {
-                throw new Error('Unknown source type: ' + sourceType);
-            }
-
-            // Cap output duration at 30 seconds
-            const MAX_OUTPUT_DURATION = 30;
-            if (duration > MAX_OUTPUT_DURATION) {
-                console.log(`Duration limited: ${duration.toFixed(2)}s → ${MAX_OUTPUT_DURATION}s`);
-                duration = MAX_OUTPUT_DURATION;
-            }
-
-            // Validate dimensions before using them
-            if (!displayWidth || !displayHeight || displayWidth <= 0 || displayHeight <= 0) {
-                throw new Error(`Invalid video dimensions: ${displayWidth}x${displayHeight}. Canvas size must be positive.`);
-            }
-
-            // Mobile devices have strict canvas size limits
-            // Max canvas area is typically 16384x16384 or ~16MP on mobile
-            // To be safe on mobile, cap at 4096x4096 (16MP)
-            const MAX_CANVAS_WIDTH = 4096;
-            const MAX_CANVAS_HEIGHT = 4096;
-            const MAX_CANVAS_AREA = 16 * 1024 * 1024; // 16MP
-
-            let finalWidth = displayWidth;
-            let finalHeight = displayHeight;
-
-            // Check if dimensions exceed mobile limits
-            if (finalWidth > MAX_CANVAS_WIDTH || finalHeight > MAX_CANVAS_HEIGHT || (finalWidth * finalHeight) > MAX_CANVAS_AREA) {
-                console.warn(`Video dimensions ${displayWidth}x${displayHeight} exceed mobile canvas limits. Scaling down...`);
-
-                // Calculate scale factors for each constraint
-                const scaleX = displayWidth > MAX_CANVAS_WIDTH ? MAX_CANVAS_WIDTH / displayWidth : 1;
-                const scaleY = displayHeight > MAX_CANVAS_HEIGHT ? MAX_CANVAS_HEIGHT / displayHeight : 1;
-                const scaleArea = (displayWidth * displayHeight) > MAX_CANVAS_AREA ? Math.sqrt(MAX_CANVAS_AREA / (displayWidth * displayHeight)) : 1;
-
-                // Use the most restrictive scale factor that satisfies all constraints
-                const scale = Math.min(scaleX, scaleY, scaleArea);
-
-                finalWidth = Math.floor(displayWidth * scale);
-                finalHeight = Math.floor(displayHeight * scale);
-
-                console.log(`Scaled canvas to ${finalWidth}x${finalHeight} (from ${displayWidth}x${displayHeight})`);
-            }
-
-            console.log("Video metadata:", { sourceType, original: `${displayWidth}x${displayHeight}`, canvas: `${finalWidth}x${finalHeight}`, duration: duration.toFixed(2) + 's' });
-
-            // 2. Setup Canvas
-            canvas.width = finalWidth;
-            canvas.height = finalHeight;
-
-            // Helper function for drawing
-            function drawFrameAndBurn(vid, text) {
-                // Draw video frame scaled to canvas size
-                ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-                const aspectRatio = canvas.width / canvas.height;
-                const isVertical = aspectRatio < 1;
-                const fontSize = isVertical ? canvas.height * 0.06 : canvas.height * 0.08;
-                ctx.font = `bold ${Math.floor(fontSize)}px sans-serif`;
-                ctx.fillStyle = '#ffffff';
-                ctx.strokeStyle = '#000000';
-                ctx.lineWidth = Math.max(2, canvas.height * 0.005);
-                ctx.textAlign = 'center';
-                const x = canvas.width / 2;
-                const y = isVertical ? canvas.height - (canvas.height * 0.3) : canvas.height - (canvas.height * 0.1);
-                ctx.strokeText(text, x, y);
-                ctx.fillText(text, x, y);
-            }
-
-            // 3. Setup Audio
-            // For HLS, we use Web Audio API to capture the stream since captureStream() isn't supported on iOS Safari
-            // For files, we will extract the audio track directly in a future step if possible, but for now, we use the same method for both
             let audioContext = null;
-            let mediaElementSource = null;
-            let mediaStreamDestination = null;
 
             try {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                mediaElementSource = audioContext.createMediaElementSource(tempVideo);
-                mediaStreamDestination = audioContext.createMediaStreamDestination();
-                mediaElementSource.connect(mediaStreamDestination);
-                mediaElementSource.connect(audioContext.destination); // Play audio through speakers to keep it alive
+                // 1. Load metadata based on source type
+                let displayWidth, displayHeight, duration, frameRate;
+                let audioTrack = null; // Audio track reference
 
-                const audioStream = mediaStreamDestination.stream;
-                const nativeAudioTrack = audioStream.getAudioTracks()[0];
+                const tempVideo = document.createElement('video');
+                tempVideo.crossOrigin = 'anonymous';
+                tempVideo.muted = false; // Must be unmuted for Web Audio API to capture audio
+                tempVideo.playsInline = true; // Prevents fullscreen takeover on iOS
+                tempVideo.volume = 0.0;  // Set volume to 0 to "mute" it for the user
 
-                if (nativeAudioTrack) {
-                    console.log("System audio context sample rate:", audioContext.sampleRate);
-                    audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
-                        codec: 'opus',
-                        sampleRate: audioContext.sampleRate || 48000,
-                        numberOfChannels: 2,
-                        bitrate: 128000
-                    });
-                    console.log("✓ Captured audio track via Web Audio API");
-                } else {
-                    console.warn("Web Audio API capture resulted in no audio track - output will be silent");
-                    audioTrack = null;
-                }
-            } catch (err) {
-                console.warn("Failed to capture audio stream via Web Audio API:", err);
-                audioTrack = null;
-            }
+                if (sourceType === 'file') {
+                    console.log("Loading file source into video element...");
+                    tempVideo.src = URL.createObjectURL(source);
 
-            // 4. Setup Output
-            const output = new Output({
-                target: new BufferTarget(),
-                format: new Mp4OutputFormat()
-            });
+                    // Wait for metadata
+                    const videoMeta = await getVideoMetadata(tempVideo);
+                    displayWidth = videoMeta.width;
+                    displayHeight = videoMeta.height;
+                    duration = videoMeta.duration;
+                    frameRate = 30;
+                } else if (sourceType === 'hls') {
+                    console.log("Loading HLS source...");
+                    const metadata = await loadHlsSource(source, tempVideo);
+                    displayWidth = metadata.displayWidth;
+                    displayHeight = metadata.displayHeight;
+                    duration = metadata.duration || 10;
+                    frameRate = 30;
+                    currentHlsInstance = metadata.hlsInstance;
 
-            // 5. Setup Video Source
-            const videoSource = new CanvasSource(canvas, {
-                codec: 'avc',
-                bitrate: 6_000_000
-            });
-            output.addVideoTrack(videoSource, { frameRate });
-
-            if (audioTrack) {
-                output.addAudioTrack(audioTrack);
-            }
-
-            await output.start();
-
-            // 7. Processing Loop (Play-Through for both file and HLS)
-            let frameCount = 0;
-            const frameDuration = 1 / frameRate;
-            const totalFrames = Math.ceil(duration * frameRate);
-
-            console.log(`=== STARTING PLAY-THROUGH (${totalFrames} frames expected) ===`);
-
-            // Monitor for video source errors
-            if (videoSource.errorPromise) {
-                videoSource.errorPromise.catch(err => {
-                    console.error("Video source error:", err);
-                    throw err;
-                });
-            }
-
-            await new Promise((resolve, reject) => {
-                let processing = true;
-                let lastLoggedFrame = 0;
-
-                const processFrame = async (now, metadata) => {
-                    if (!processing) return;
-
-                    try {
-                        const currentTime = metadata.mediaTime || tempVideo.currentTime;
-
-                        // Check termination conditions
-                        if (frameCount >= totalFrames) {
-                            console.log(`Reached frame limit: ${frameCount} / ${totalFrames}`);
-                            processing = false;
-                            tempVideo.pause();
-                            resolve();
-                            return;
+                    if (!isFinite(duration) || duration <= 0) {
+                        try {
+                            const videoMeta = await getVideoMetadata(tempVideo);
+                            duration = videoMeta.duration;
+                        } catch (err) {
+                            console.error("Failed to get duration:", err);
+                            duration = 10;
                         }
-
-                        if (tempVideo.ended) {
-                            console.log(`Video ended at frame ${frameCount}`);
-                            processing = false;
-                            tempVideo.pause();
-                            resolve();
-                            return;
-                        }
-
-                        if (currentTime >= duration) {
-                            console.log(`Duration reached: ${currentTime.toFixed(2)}s >= ${duration}s at frame ${frameCount}`);
-                            processing = false;
-                            tempVideo.pause();
-                            resolve();
-                            return;
-                        }
-
-                        // Draw and Burn
-                        drawFrameAndBurn(tempVideo, textToBurn);
-
-                        // Add frame to encoder
-                        await videoSource.add(currentTime, frameDuration);
-                        frameCount++;
-
-                        if (frameCount - lastLoggedFrame >= 30) {
-                            status.textContent = `Recording: ${frameCount} / ${totalFrames} frames...`;
-                            lastLoggedFrame = frameCount;
-                            console.log(`Frame ${frameCount} at ${currentTime.toFixed(2)}s`);
-                        }
-
-                        // Continue
-                        tempVideo.requestVideoFrameCallback(processFrame);
-                    } catch (e) {
-                        console.error("Frame processing error:", e);
-                        processing = false;
-                        reject(e);
                     }
-                };
+                } else {
+                    throw new Error('Unknown source type: ' + sourceType);
+                }
 
-                // Start playback
-                tempVideo.requestVideoFrameCallback(processFrame);
-                tempVideo.play().catch(e => {
-                    console.error("Auto-play failed:", e);
-                    reject(e);
+                // Cap output duration at 30 seconds
+                const MAX_OUTPUT_DURATION = 30;
+                if (duration > MAX_OUTPUT_DURATION) {
+                    console.log(`Duration limited: ${duration.toFixed(2)}s → ${MAX_OUTPUT_DURATION}s`);
+                    duration = MAX_OUTPUT_DURATION;
+                }
+
+                // Validate dimensions before using them
+                if (!displayWidth || !displayHeight || displayWidth <= 0 || displayHeight <= 0) {
+                    throw new Error(`Invalid video dimensions: ${displayWidth}x${displayHeight}. Canvas size must be positive.`);
+                }
+
+                // Mobile devices have strict canvas size limits
+                const MAX_CANVAS_WIDTH = 4096;
+                const MAX_CANVAS_HEIGHT = 4096;
+                const MAX_CANVAS_AREA = 16 * 1024 * 1024; // 16MP
+                let finalWidth = displayWidth;
+                let finalHeight = displayHeight;
+
+                if (finalWidth > MAX_CANVAS_WIDTH || finalHeight > MAX_CANVAS_HEIGHT || (finalWidth * finalHeight) > MAX_CANVAS_AREA) {
+                    console.warn(`Video dimensions ${displayWidth}x${displayHeight} exceed mobile canvas limits. Scaling down...`);
+                    const scaleX = displayWidth > MAX_CANVAS_WIDTH ? MAX_CANVAS_WIDTH / displayWidth : 1;
+                    const scaleY = displayHeight > MAX_CANVAS_HEIGHT ? MAX_CANVAS_HEIGHT / displayHeight : 1;
+                    const scaleArea = (displayWidth * displayHeight) > MAX_CANVAS_AREA ? Math.sqrt(MAX_CANVAS_AREA / (displayWidth * displayHeight)) : 1;
+                    const scale = Math.min(scaleX, scaleY, scaleArea);
+                    finalWidth = Math.floor(displayWidth * scale);
+                    finalHeight = Math.floor(displayHeight * scale);
+                    console.log(`Scaled canvas to ${finalWidth}x${finalHeight} (from ${displayWidth}x${displayHeight})`);
+                }
+
+                console.log("Video metadata:", { sourceType, original: `${displayWidth}x${displayHeight}`, canvas: `${finalWidth}x${finalHeight}`, duration: duration.toFixed(2) + 's' });
+
+                // 2. Setup Canvas
+                canvas.width = finalWidth;
+                canvas.height = finalHeight;
+
+                function drawFrameAndBurn(vid, text) {
+                    ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+                    const aspectRatio = canvas.width / canvas.height;
+                    const isVertical = aspectRatio < 1;
+                    const fontSize = isVertical ? canvas.height * 0.06 : canvas.height * 0.08;
+                    ctx.font = `bold ${Math.floor(fontSize)}px sans-serif`;
+                    ctx.fillStyle = '#ffffff';
+                    ctx.strokeStyle = '#000000';
+                    ctx.lineWidth = Math.max(2, canvas.height * 0.005);
+                    ctx.textAlign = 'center';
+                    const x = canvas.width / 2;
+                    const y = isVertical ? canvas.height - (canvas.height * 0.3) : canvas.height - (canvas.height * 0.1);
+                    ctx.strokeText(text, x, y);
+                    ctx.fillText(text, x, y);
+                }
+
+                // 3. Setup Audio
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const mediaElementSource = audioContext.createMediaElementSource(tempVideo);
+                    const mediaStreamDestination = audioContext.createMediaStreamDestination();
+                    mediaElementSource.connect(mediaStreamDestination);
+                    mediaElementSource.connect(audioContext.destination);
+
+                    const audioStream = mediaStreamDestination.stream;
+                    const nativeAudioTrack = audioStream.getAudioTracks()[0];
+
+                    if (nativeAudioTrack) {
+                        console.log("System audio context sample rate:", audioContext.sampleRate);
+                        audioTrack = new MediaStreamAudioTrackSource(nativeAudioTrack, {
+                            codec: 'opus',
+                            sampleRate: audioContext.sampleRate || 48000,
+                            numberOfChannels: 2,
+                            bitrate: 128000
+                        });
+                        console.log("✓ Captured audio track via Web Audio API");
+                    } else {
+                        console.warn("Web Audio API capture resulted in no audio track - output will be silent");
+                    }
+                } catch (err) {
+                    console.warn("Failed to capture audio stream via Web Audio API:", err);
+                }
+
+                // 4. Setup Output
+                const output = new Output({
+                    target: new BufferTarget(),
+                    format: new Mp4OutputFormat()
                 });
-            });
 
-            console.log("=== RECORDING COMPLETE ===");
-            console.log("Total frames encoded:", frameCount);
+                const videoSource = new CanvasSource(canvas, {
+                    codec: 'avc',
+                    bitrate: 6_000_000
+                });
+                output.addVideoTrack(videoSource, { frameRate });
 
-            console.log("Closing video source...");
-            await videoSource.close();
-            console.log("✓ Video source closed");
+                if (audioTrack) {
+                    output.addAudioTrack(audioTrack);
+                }
 
-            status.textContent = "Finalizing MP4 file...";
-            console.log("Calling output.finalize()...");
-            await output.finalize();
-            console.log("✓ output.finalize() complete");
+                await output.start();
 
-            // Debug: Check what's in the buffer
-            console.log("=== OUTPUT BUFFER DEBUG ===");
-            console.log("output.target:", output.target);
-            console.log("output.target.buffer:", output.target.buffer);
-            console.log("Buffer type:", output.target.buffer?.constructor?.name);
-            console.log("Buffer byteLength:", output.target.buffer?.byteLength);
-            console.log("Buffer length:", output.target.buffer?.length);
+                // 7. Processing Loop
+                let frameCount = 0;
+                const frameDuration = 1 / frameRate;
+                const totalFrames = Math.ceil(duration * frameRate);
 
-            let finalBlob;
-            if (output.target.buffer instanceof ArrayBuffer) {
-                console.log("Buffer is ArrayBuffer - creating Uint8Array wrapper");
-                finalBlob = new Blob([new Uint8Array(output.target.buffer)], { type: 'video/mp4' });
-            } else if (output.target.buffer instanceof Uint8Array) {
-                console.log("Buffer is Uint8Array - using directly");
-                finalBlob = new Blob([output.target.buffer], { type: 'video/mp4' });
-            } else if (Array.isArray(output.target.buffer)) {
-                console.log("Buffer is Array - converting to Uint8Array");
-                finalBlob = new Blob([new Uint8Array(output.target.buffer)], { type: 'video/mp4' });
-            } else {
-                const bufferType = typeof output.target.buffer;
-                console.error("Unknown buffer type:", bufferType);
-                throw new Error(`Unexpected buffer type: ${bufferType}`);
+                console.log(`=== STARTING PLAY-THROUGH (${totalFrames} frames expected) ===`);
+
+                if (videoSource.errorPromise) {
+                    videoSource.errorPromise.catch(err => {
+                        console.error("Video source error:", err);
+                        throw err;
+                    });
+                }
+
+                await new Promise((resolve, reject) => {
+                    let processing = true;
+                    let lastLoggedFrame = 0;
+
+                    const processFrame = async (now, metadata) => {
+                        if (!processing) return;
+                        try {
+                            const currentTime = metadata.mediaTime || tempVideo.currentTime;
+                            if (frameCount >= totalFrames || tempVideo.ended || currentTime >= duration) {
+                                processing = false;
+                                tempVideo.pause();
+                                resolve();
+                                return;
+                            }
+
+                            drawFrameAndBurn(tempVideo, textToBurn);
+                            await videoSource.add(currentTime, frameDuration);
+                            frameCount++;
+
+                            if (frameCount - lastLoggedFrame >= 30) {
+                                status.textContent = `Recording: ${frameCount} / ${totalFrames} frames...`;
+                                lastLoggedFrame = frameCount;
+                            }
+                            tempVideo.requestVideoFrameCallback(processFrame);
+                        } catch (e) {
+                            processing = false;
+                            reject(e);
+                        }
+                    };
+                    tempVideo.requestVideoFrameCallback(processFrame);
+                    tempVideo.play().catch(reject);
+                });
+
+                console.log("=== RECORDING COMPLETE ===");
+                await videoSource.close();
+                status.textContent = "Finalizing MP4 file...";
+                await output.finalize();
+                console.log("✓ output.finalize() complete");
+
+                let finalBlob;
+                if (output.target.buffer instanceof ArrayBuffer) {
+                    finalBlob = new Blob([new Uint8Array(output.target.buffer)], { type: 'video/mp4' });
+                } else {
+                    finalBlob = new Blob([output.target.buffer], { type: 'video/mp4' });
+                }
+
+                console.log("✓ Final blob created - size:", finalBlob.size, "bytes");
+                if (finalBlob.size < 200) {
+                    console.warn("⚠️  Blob is very small (likely just MP4 header, no video data encoded)");
+                }
+
+                const videoUrl = URL.createObjectURL(finalBlob);
+                document.getElementById('outputVideo').src = videoUrl;
+                outputBlob = finalBlob;
+                shareButtons.style.display = 'flex';
+                status.textContent = "Success! Video generated locally. Share or download below.";
+                processBtn.disabled = false;
+                console.log("=== PIPELINE COMPLETE ===");
+
+            } finally {
+                // Cleanup HLS instance if used
+                if (currentHlsInstance) {
+                    console.log("Cleaning up HLS instance...");
+                    currentHlsInstance.destroy();
+                    hlsInstance = null;
+                }
+                // Cleanup AudioContext
+                if (audioContext) {
+                    console.log("Closing AudioContext...");
+                    audioContext.close();
+                }
             }
-
-            console.log("✓ Final blob created - size:", finalBlob.size, "bytes");
-
-            if (finalBlob.size < 200) {
-                console.warn("⚠️  Blob is very small (likely just MP4 header, no video data encoded)");
-            }
-
-            const videoUrl = URL.createObjectURL(finalBlob);
-            document.getElementById('outputVideo').src = videoUrl;
-            console.log("✓ Output video src set");
-
-            // Store blob for sharing and downloading
-            outputBlob = finalBlob;
-            shareButtons.style.display = 'flex';
-
-            status.textContent = "Success! Video generated locally. Share or download below.";
-            processBtn.disabled = false;
-
-            // Cleanup HLS instance if used
-            if (currentHlsInstance) {
-                console.log("Cleaning up HLS instance...");
-                currentHlsInstance.destroy();
-                hlsInstance = null;
-            }
-
-            // Cleanup AudioContext
-            if (audioContext) {
-                console.log("Closing AudioContext...");
-                audioContext.close();
-            }
-
-            console.log("=== PIPELINE COMPLETE ===");
         }
 
         // Download button handler
