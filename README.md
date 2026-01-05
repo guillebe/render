@@ -1,4 +1,4 @@
-# Client Side Caption Burner
+# Client Side Caption Burner 
 
 This is a browser-based tool that allows you to "burn" captions directly onto video files or HLS streams. All video processing happens locally within your browser using the `mediabunny` library, ensuring privacy and speed without needing server-side processing.
 
