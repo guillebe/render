@@ -478,25 +478,62 @@
                 throw new Error(`Invalid video dimensions: ${displayWidth}x${displayHeight}. Canvas size must be positive.`);
             }
 
-            console.log("Video metadata:", { sourceType, displayWidth, displayHeight, duration: duration.toFixed(2) + 's' });
+            // Mobile devices have strict canvas size limits
+            // Max canvas area is typically 16384x16384 or ~16MP on mobile
+            // To be safe on mobile, cap at 4096x4096 (16MP)
+            const MAX_CANVAS_WIDTH = 4096;
+            const MAX_CANVAS_HEIGHT = 4096;
+            const MAX_CANVAS_AREA = 16 * 1024 * 1024; // 16MP
+
+            let finalWidth = displayWidth;
+            let finalHeight = displayHeight;
+
+            // Check if dimensions exceed mobile limits
+            if (finalWidth > MAX_CANVAS_WIDTH || finalHeight > MAX_CANVAS_HEIGHT || (finalWidth * finalHeight) > MAX_CANVAS_AREA) {
+                console.warn(`Video dimensions ${displayWidth}x${displayHeight} exceed mobile canvas limits. Scaling down...`);
+
+                // Scale proportionally to fit constraints
+                const aspectRatio = displayWidth / displayHeight;
+                const areaExceeded = (displayWidth * displayHeight) > MAX_CANVAS_AREA;
+                const widthExceeded = displayWidth > MAX_CANVAS_WIDTH;
+                const heightExceeded = displayHeight > MAX_CANVAS_HEIGHT;
+
+                if (areaExceeded) {
+                    // Scale based on area limit
+                    const maxSide = Math.sqrt(MAX_CANVAS_AREA / (aspectRatio < 1 ? aspectRatio : 1 / aspectRatio));
+                    finalWidth = Math.floor(aspectRatio >= 1 ? maxSide : maxSide * aspectRatio);
+                    finalHeight = Math.floor(aspectRatio >= 1 ? maxSide / aspectRatio : maxSide);
+                } else if (widthExceeded) {
+                    finalWidth = MAX_CANVAS_WIDTH;
+                    finalHeight = Math.floor(MAX_CANVAS_WIDTH / aspectRatio);
+                } else if (heightExceeded) {
+                    finalHeight = MAX_CANVAS_HEIGHT;
+                    finalWidth = Math.floor(MAX_CANVAS_HEIGHT * aspectRatio);
+                }
+
+                console.log(`Scaled canvas to ${finalWidth}x${finalHeight} (from ${displayWidth}x${displayHeight})`);
+            }
+
+            console.log("Video metadata:", { sourceType, original: `${displayWidth}x${displayHeight}`, canvas: `${finalWidth}x${finalHeight}`, duration: duration.toFixed(2) + 's' });
 
             // 2. Setup Canvas
-            canvas.width = displayWidth;
-            canvas.height = displayHeight;
+            canvas.width = finalWidth;
+            canvas.height = finalHeight;
 
             // Helper function for drawing
             function drawFrameAndBurn(vid, text, w, h) {
-                ctx.drawImage(vid, 0, 0, w, h);
-                const aspectRatio = w / h;
+                // Draw video frame scaled to canvas size
+                ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+                const aspectRatio = canvas.width / canvas.height;
                 const isVertical = aspectRatio < 1;
-                const fontSize = isVertical ? h * 0.06 : h * 0.08;
+                const fontSize = isVertical ? canvas.height * 0.06 : canvas.height * 0.08;
                 ctx.font = `bold ${Math.floor(fontSize)}px sans-serif`;
                 ctx.fillStyle = '#ffffff';
                 ctx.strokeStyle = '#000000';
-                ctx.lineWidth = Math.max(2, h * 0.005);
+                ctx.lineWidth = Math.max(2, canvas.height * 0.005);
                 ctx.textAlign = 'center';
-                const x = w / 2;
-                const y = isVertical ? h - (h * 0.3) : h - (h * 0.1);
+                const x = canvas.width / 2;
+                const y = isVertical ? canvas.height - (canvas.height * 0.3) : canvas.height - (canvas.height * 0.1);
                 ctx.strokeText(text, x, y);
                 ctx.fillText(text, x, y);
             }
