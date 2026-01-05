@@ -212,7 +212,11 @@
 
         processBtn.addEventListener('click', async () => {
             processBtn.disabled = true;
-            status.textContent = "Processing... do not close this tab.";
+            // Mute the preview video during processing to prevent audio playback
+            const originalVideo = document.getElementById('originalVideo');
+            const wasOriginalVideoMuted = originalVideo.muted;
+            originalVideo.muted = true;
+            status.textContent = "Generating... do not close this tab.";
 
             console.log("=== PIPELINE START ===");
             try {
@@ -225,6 +229,9 @@
                 console.error("Error stack:", err.stack);
                 status.textContent = "Error: " + err.message;
                 processBtn.disabled = false;
+            } finally {
+                // Restore preview video mute state
+                originalVideo.muted = wasOriginalVideoMuted;
             }
         });
 
@@ -614,7 +621,7 @@
                             frameCount++;
 
                             if (frameCount - lastLoggedFrame >= 30) {
-                                status.textContent = `Recording: ${frameCount} / ${totalFrames} frames...`;
+                                status.textContent = `Generating: ${frameCount} / ${totalFrames} frames...`;
                                 lastLoggedFrame = frameCount;
                             }
                             tempVideo.requestVideoFrameCallback(processFrame);
